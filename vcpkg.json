@@ -1,0 +1,40 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+  "name": "agentgateway",
+  "version": "0.1.0",
+  "description": "AgentGateway - C++20 middleware for AI agent payment and identity verification",
+  "homepage": "https://github.com/ctronik/agentgateway",
+  "license": "GPL-3.0-only",
+  "supports": "windows | linux | osx",
+  "dependencies": [
+    {
+      "name": "drogon",
+      "features": ["orm"]
+    },
+    "boost-asio",
+    "boost-beast",
+    "boost-system",
+    "boost-thread",
+    "boost-filesystem",
+    "boost-json",
+    "openssl",
+    {
+      "name": "tomlplusplus"
+    },
+    {
+      "name": "spdlog",
+      "features": ["fmt"]
+    },
+    {
+      "name": "nlohmann-json"
+    },
+    {
+      "name": "prometheus-cpp",
+      "features": ["pull"]
+    },
+    {
+      "name": "gtest"
+    }
+  ],
+  "builtin-baseline": "bf19794383e8fb95eba5aa553235bc8ec2271688"
+}

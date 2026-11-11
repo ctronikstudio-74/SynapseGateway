@@ -1,0 +1,90 @@
+# AgentGateway C++20 Static Analysis Configuration
+# Enables modern C++ checks and security-focused analysis
+
+---
+Checks: >
+  -*,
+  bugprone-*,
+  cert-*,
+  clang-analyzer-*,
+  concurrency-*,
+  cppcoreguidelines-*,
+  misc-*,
+  modernize-*,
+  performance-*,
+  portability-*,
+  readability-*,
+  -bugprone-easily-swappable-parameters,
+  -cppcoreguidelines-avoid-magic-numbers,
+  -cppcoreguidelines-pro-bounds-array-to-pointer-decay,
+  -cppcoreguidelines-pro-bounds-pointer-arithmetic,
+  -cppcoreguidelines-pro-type-reinterpret-cast,
+  -misc-non-private-member-variables-in-classes,
+  -modernize-use-trailing-return-type,
+  -readability-identifier-length,
+  -readability-magic-numbers
+
+WarningsAsErrors: ''
+
+CheckOptions:
+  # Naming conventions
+  - key: readability-identifier-naming.NamespaceCase
+    value: lower_case
+  - key: readability-identifier-naming.ClassCase
+    value: CamelCase
+  - key: readability-identifier-naming.StructCase
+    value: CamelCase
+  - key: readability-identifier-naming.EnumCase
+    value: CamelCase
+  - key: readability-identifier-naming.FunctionCase
+    value: camelBack
+  - key: readability-identifier-naming.VariableCase
+    value: lower_case
+  - key: readability-identifier-naming.ConstantCase
+    value: UPPER_CASE
+  - key: readability-identifier-naming.ParameterCase
+    value: lower_case
+  - key: readability-identifier-naming.MemberCase
+    value: lower_case
+  - key: readability-identifier-naming.PrivateMemberSuffix
+    value: _
+  - key: readability-identifier-naming.ProtectedMemberSuffix
+    value: _
+  - key: readability-identifier-naming.TemplateParameterCase
+    value: CamelCase
+
+  # Function length
+  - key: readability-function-size.LineThreshold
+    value: 150
+  - key: readability-function-size.StatementThreshold
+    value: 100
+
+  # Cognitive complexity
+  - key: readability-function-cognitive-complexity.Threshold
+    value: 25
+
+  # Performance
+  - key: performance-move-const-arg.CheckTriviallyCopyableMove
+    value: 1
+  - key: performance-unnecessary-value-param.AllowedTypes
+    value: ''
+
+  # Modernize
+  - key: modernize-use-nullptr.NullMacros
+    value: 'NULL'
+  - key: modernize-use-auto.MinTypeNameLength
+    value: 8
+
+  # Core Guidelines
+  - key: cppcoreguidelines-special-member-functions.AllowSoleDefaultDtor
+    value: 1
+  - key: cppcoreguidelines-avoid-do-while.IgnoreMacros
+    value: 1
+
+  # Misc
+  - key: misc-throw-by-value-catch-by-reference.CheckThrowTemporaries
+    value: 1
+
+HeaderFilterRegex: '.*gateway/.*'
+AnalyzeTemporaryDtors: true
+FormatStyle: file

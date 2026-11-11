@@ -1,0 +1,11 @@
+{
+  "name": "agentgateway-registries",
+  "private": true,
+  "scripts": {
+    "test": "hardhat test"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^4.1.0",
+    "hardhat": "^2.22.17"
+  }
+}

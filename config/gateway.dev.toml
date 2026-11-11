@@ -1,0 +1,56 @@
+# AgentGateway Development Configuration
+# Optimized for local development and testing
+
+[server]
+listen_address = "127.0.0.1"
+listen_port = 8080
+monitoring_port = 9090
+thread_pool_size = 4
+
+[blockchain]
+# Development seed (DO NOT USE IN PRODUCTION)
+payment_wallet_seed = "test test test test test test test test test test test junk"
+
+# Only Base testnet enabled for development
+[[blockchain.networks]]
+network = "base"
+rpc_url = "https://goerli.base.org"
+identity_registry = "0x0000000000000000000000000000000000000000"
+reputation_registry = "0x0000000000000000000000000000000000000000"
+validation_registry = "0x0000000000000000000000000000000000000000"
+gas_limit = 500000
+enabled = true
+
+# Free development endpoint
+[[endpoints]]
+path_pattern = "/api/.*"
+price_usdc = 0.0
+trust_threshold = 0.0
+required_proofs = []
+backend_url = "http://localhost:3000"
+backend_timeout = 30
+rate_limit_per_minute = 1000
+new_agents_allowed = true
+
+[default_endpoint]
+price_usdc = 0.0
+trust_threshold = 0.0
+required_proofs = []
+backend_url = "http://localhost:3000"
+backend_timeout = 30
+rate_limit_per_minute = 1000
+new_agents_allowed = true
+
+[cache]
+max_size_mb = 128
+default_ttl_seconds = 60
+
+[security]
+bloom_filter_size_mb = 10
+bloom_filter_retention_hours = 24
+
+[monitoring]
+prometheus_enabled = true
+opentelemetry_enabled = false
+log_level = "debug"
+json_logging = false

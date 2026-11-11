@@ -1,0 +1,19 @@
+[Unit]
+Description=AgentGateway x402 reverse proxy
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=agentgateway
+Group=agentgateway
+WorkingDirectory=/var/lib/agentgateway
+ExecStart=/usr/local/bin/gateway_node /etc/agentgateway/gateway.toml
+Restart=on-failure
+RestartSec=2
+TimeoutStopSec=35
+KillSignal=SIGTERM
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

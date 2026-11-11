@@ -1,0 +1,23 @@
+Markdown
+# Istruzioni di Progetto C++20 Cross-Platform (Migrazione da Kiro)
+
+## Context & Architecture
+- Prima di eseguire qualsiasi task o generare codice, fai riferimento alla documentazione tecnica, ai file di analisi e ai documenti di design presenti nella cartella `docs/` o `.cursor/rules/`(.cursor/rules/spec/agent-gateway/design.md, .cursor/rules/spec/agent-gateway/requirements.md, .cursor/rules/spec/agent-gateway/tasks.md etc...)
+- Rispetta l'architettura, le convenzioni e i pattern C++ definiti nei file di design forniti da Kiro.
+
+## C++20 & Cross-Platform Standards
+- **Linguaggio & Standard:** Utilizza esclusivamente C++20 standard moderno (es. Concepts, Ranges, Coroutine se indicate, `std::format`, `std::span`, modules se previsti dall'architettura).
+- **Portabilità Cross-Platform:** 
+  - Il codice deve compilare senza warning ed errori su **MSVC**, **GCC** e **Clang**.
+  - Evita API o header specifici dell'OS (es. `<windows.h>`, POSIX) nel codice di dominio; isola le dipendenze di piattaforma dietro interfacce/astrazioni pulite se richiesto dal design.
+  - Utilizza `std::filesystem` per la gestione dei file e dei percorsi.
+- **Gestione Memoria & Safety:**
+  - Prediligi RAII e smart pointer (`std::unique_ptr`, `std::shared_ptr`).
+  - Evita la gestione manuale della memoria e i cast di tipo C (`c-style casts`).
+  - Garantisci eccezione-safety (const-correctness, `noexcept` dove opportuno).
+
+## Workflow per l'esecuzione dei Task
+1. **Analisi Preventiva:** Prima di modificare file `.hpp`/`.cpp`, leggi le specifiche per quel modulo, tenendo conto dei file .cursor/rules/spec/agent-gateway/design.md, .cursor/rules/spec/agent-gateway/requirements.md, .cursor/rules/spec/agent-gateway/tasks.md
+2. **Implementazione:** Mieni separata l'interfaccia (header) dall'implementazione dove appropriato e rispetta la struttura delle cartelle/CMake già definita.
+3. **Build System:** Se il task richiede l'aggiunta di nuove librerie o file, aggiorna i file `CMakeLists.txt` mantenendo la configurazione cross-platform.
+4. **Verifica:** Genera codice che mantenga la compatibilità con i test esistenti (es. GoogleTest, Catch2) o crea nuovi test unitari come specificato nei documenti di design.

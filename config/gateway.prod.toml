@@ -1,0 +1,97 @@
+# AgentGateway Production Configuration Template
+# Security hardened configuration for production deployment
+# IMPORTANT: Review and customize all values before deployment
+
+[server]
+listen_address = "0.0.0.0"
+listen_port = 8080
+monitoring_port = 9090
+thread_pool_size = 0  # Auto-detect CPU cores
+
+[blockchain]
+# CRITICAL: Replace with secure seed from environment variable
+# Set AGENTGW_WALLET_SEED environment variable instead of hardcoding
+payment_wallet_seed = "${AGENTGW_WALLET_SEED}"
+
+# Production mainnet configurations
+[[blockchain.networks]]
+network = "base"
+rpc_url = "${BASE_RPC_URL}"
+identity_registry = "${BASE_IDENTITY_REGISTRY}"
+reputation_registry = "${BASE_REPUTATION_REGISTRY}"
+validation_registry = "${BASE_VALIDATION_REGISTRY}"
+gas_limit = 500000
+enabled = true
+
+[[blockchain.networks]]
+network = "arbitrum"
+rpc_url = "${ARBITRUM_RPC_URL}"
+identity_registry = "${ARBITRUM_IDENTITY_REGISTRY}"
+reputation_registry = "${ARBITRUM_REPUTATION_REGISTRY}"
+validation_registry = "${ARBITRUM_VALIDATION_REGISTRY}"
+gas_limit = 800000
+enabled = true
+
+[[blockchain.networks]]
+network = "polygon"
+rpc_url = "${POLYGON_RPC_URL}"
+identity_registry = "${POLYGON_IDENTITY_REGISTRY}"
+reputation_registry = "${POLYGON_REPUTATION_REGISTRY}"
+validation_registry = "${POLYGON_VALIDATION_REGISTRY}"
+gas_limit = 600000
+enabled = true
+
+# Production API endpoints
+[[endpoints]]
+path_pattern = "/api/v1/standard/.*"
+price_usdc = 0.001
+trust_threshold = 0.7
+required_proofs = []
+backend_url = "${BACKEND_STANDARD_URL}"
+backend_timeout = 5
+rate_limit_per_minute = 100
+new_agents_allowed = true
+
+[[endpoints]]
+path_pattern = "/api/v1/premium/.*"
+price_usdc = 0.01
+trust_threshold = 0.85
+required_proofs = ["zkml"]
+backend_url = "${BACKEND_PREMIUM_URL}"
+backend_timeout = 10
+rate_limit_per_minute = 50
+new_agents_allowed = false
+
+[[endpoints]]
+path_pattern = "/api/v1/enterprise/.*"
+price_usdc = 0.05
+trust_threshold = 0.9
+required_proofs = ["zkml", "staking"]
+backend_url = "${BACKEND_ENTERPRISE_URL}"
+backend_timeout = 15
+rate_limit_per_minute = 20
+new_agents_allowed = false
+
+[default_endpoint]
+price_usdc = 0.005
+trust_threshold = 0.75
+required_proofs = []
+backend_url = "${BACKEND_DEFAULT_URL}"
+backend_timeout = 5
+rate_limit_per_minute = 50
+new_agents_allowed = true
+
+[cache]
+max_size_mb = 2048
+default_ttl_seconds = 300
+
+[security]
+bloom_filter_size_mb = 500
+bloom_filter_retention_hours = 720  # 30 days
+
+[monitoring]
+prometheus_enabled = true
+opentelemetry_enabled = true
+otel_collector_endpoint = "${OTEL_COLLECTOR_URL}"
+log_level = "info"
+json_logging = true

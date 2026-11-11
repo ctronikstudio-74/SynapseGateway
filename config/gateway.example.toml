@@ -1,0 +1,152 @@
+# AgentGateway Configuration Example
+# This file demonstrates all available configuration options
+# Copy to gateway.toml and customize for your deployment
+
+[server]
+# HTTP server binding configuration
+listen_address = "0.0.0.0"
+listen_port = 8080
+
+# Monitoring and metrics endpoint
+monitoring_port = 9090
+
+# Thread pool size for request handling (0 = auto-detect CPU cores)
+thread_pool_size = 0
+
+[blockchain]
+# Seed phrase for deterministic wallet generation (KEEP SECURE!)
+# In production, use environment variable: AGENTGW_WALLET_SEED
+payment_wallet_seed = "your-secure-seed-phrase-here-replace-in-production"
+
+# Blockchain network configurations
+[[blockchain.networks]]
+network = "base"
+rpc_url = "https://mainnet.base.org"
+identity_registry = "0x0000000000000000000000000000000000000000"
+reputation_registry = "0x0000000000000000000000000000000000000000"
+validation_registry = "0x0000000000000000000000000000000000000000"
+gas_limit = 500000
+enabled = true
+
+[[blockchain.networks]]
+network = "arbitrum"
+rpc_url = "https://arb1.arbitrum.io/rpc"
+identity_registry = "0x0000000000000000000000000000000000000000"
+reputation_registry = "0x0000000000000000000000000000000000000000"
+validation_registry = "0x0000000000000000000000000000000000000000"
+gas_limit = 800000
+enabled = true
+
+[[blockchain.networks]]
+network = "polygon"
+rpc_url = "https://polygon-rpc.com"
+identity_registry = "0x0000000000000000000000000000000000000000"
+reputation_registry = "0x0000000000000000000000000000000000000000"
+validation_registry = "0x0000000000000000000000000000000000000000"
+gas_limit = 600000
+enabled = true
+
+[[blockchain.networks]]
+network = "ethereum"
+rpc_url = "https://eth-mainnet.g.alchemy.com/v2/your-api-key"
+identity_registry = "0x0000000000000000000000000000000000000000"
+reputation_registry = "0x0000000000000000000000000000000000000000"
+validation_registry = "0x0000000000000000000000000000000000000000"
+gas_limit = 1000000
+enabled = false
+
+[[blockchain.networks]]
+network = "bnb"
+rpc_url = "https://bsc-dataseed1.binance.org"
+identity_registry = "0x0000000000000000000000000000000000000000"
+reputation_registry = "0x0000000000000000000000000000000000000000"
+validation_registry = "0x0000000000000000000000000000000000000000"
+gas_limit = 500000
+enabled = false
+
+# Endpoint-specific configurations
+[[endpoints]]
+# Path pattern using regex syntax
+path_pattern = "/api/v1/chat"
+
+# Price in USDC (0.0 = free endpoint, no blockchain verification)
+price_usdc = 0.001
+
+# Minimum trust score required (0.0 - 1.0)
+trust_threshold = 0.7
+
+# Required proof types: none, zkml, tee, staking (can combine multiple)
+required_proofs = ["none"]
+
+# Backend API URL
+backend_url = "http://localhost:3000/chat"
+
+# Backend request timeout in seconds
+backend_timeout = 5
+
+# Rate limit per wallet address (requests per minute)
+rate_limit_per_minute = 100
+
+# Allow agents without reputation history
+new_agents_allowed = true
+
+[[endpoints]]
+path_pattern = "/api/v1/premium/.*"
+price_usdc = 0.01
+trust_threshold = 0.85
+required_proofs = ["zkml", "staking"]
+backend_url = "http://localhost:3000"
+backend_timeout = 10
+rate_limit_per_minute = 20
+new_agents_allowed = false
+
+[[endpoints]]
+path_pattern = "/api/v1/free/.*"
+price_usdc = 0.0
+trust_threshold = 0.6
+required_proofs = []
+backend_url = "http://localhost:3000"
+backend_timeout = 5
+rate_limit_per_minute = 200
+new_agents_allowed = true
+
+# Default endpoint configuration (applied when no pattern matches).
+# Kept as its own table: TOML forbids [endpoints.default] beside [[endpoints]].
+[default_endpoint]
+price_usdc = 0.005
+trust_threshold = 0.75
+required_proofs = []
+backend_url = "http://localhost:3000"
+backend_timeout = 5
+rate_limit_per_minute = 50
+new_agents_allowed = true
+
+[cache]
+# Maximum cache size in megabytes
+max_size_mb = 512
+
+# Default TTL for cached entries in seconds
+default_ttl_seconds = 300
+
+[security]
+# Bloom filter size for replay attack prevention (in MB)
+bloom_filter_size_mb = 100
+
+# Bloom filter retention period (in hours, 720h = 30 days)
+bloom_filter_retention_hours = 720
+
+[monitoring]
+# Enable Prometheus metrics exposition
+prometheus_enabled = true
+
+# Enable OpenTelemetry distributed tracing
+opentelemetry_enabled = false
+
+# OpenTelemetry collector endpoint (if enabled)
+# otel_collector_endpoint = "http://localhost:4317"
+
+# Logging level: trace, debug, info, warn, error
+log_level = "info"
+
+# Structured JSON logging to stdout
+json_logging = true

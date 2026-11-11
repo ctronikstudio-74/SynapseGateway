@@ -1,0 +1,7 @@
+build
+install
+.git
+.vs
+data
+*.pdb
+*.ilk
