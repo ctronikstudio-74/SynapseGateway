@@ -1,6 +1,6 @@
 # SynapseGateway dependencies
 
-This document describes all third-party dependencies used in SynapseGateway 0.2.0 and how to set them up.
+This document describes all third-party dependencies used in SynapseGateway 0.3.0 and how to set them up. Version 0.3.0 adds no libraries: the OTLP span is JSON posted through the existing HTTP client.
 
 ## Dependency Management
 

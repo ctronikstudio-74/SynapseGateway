@@ -22,22 +22,24 @@ On startup the process derives the collection address with CREATE2 from `payment
 
 ## Request path
 
-`GET /health` does not require a signature. It returns 200 only when every enabled network is healthy, otherwise 503 with a per-network detail.
+`GET /health`, `GET /mcp`, and `POST /mcp` do not require a signature. Health returns 200 only when every enabled network is healthy, otherwise 503 with a per-network detail. `GET` or `POST /v1/auth` reads the original method and URI from the edge-proxy headers and then follows the list below. That path never calls the backend.
 
-Every other request follows this order.
+Every protected request follows this order.
 
 1. **Signature.** `X-Agent-Signature` is an EIP-712 signature over method, path, body hash, wallet, quote reference, and quote expiry. The domain is `AgentGateway` version `1`, the chain id is the quote network, and the verifying contract is the CREATE2 collection address. If recovery does not match the wallet, the process calls `isValidSignature` (ERC-1271) and accepts the magic value `0x1626ba7e`. Anything else is 401.
 2. **Wallet.** The address comes from `X-Agent-Wallet`, `X-Wallet-Address`, or `X-Payment-Wallet`. It must be `0x` plus 40 hex digits.
 3. **Denylist.** A wallet in `[wallet_policy].denylist` is 403 before payment, refunds, or credits.
 4. **Refunds and credit.** `POST /v1/refunds` and `POST /v1/credits` are handled here.
 5. **Route.** The path is matched against `[[endpoints]]` regular expressions. Otherwise `[default_endpoint]` applies.
-6. **Allowlist.** A non-empty endpoint `allowlist` rejects every other wallet with 403.
-7. **Rate limit.** A 60-second window per wallet. Over the limit the response is 429 with `Retry-After`.
-8. **Payment.** See below.
-9. **Identity.** The ERC-721 registry of the selected network must assign an NFT to the wallet. The result is cached for 300 seconds. `minimum_nft_age_seconds` above zero requires the NFT registration timestamp to be at least that old. Failure is 403.
-10. **Reputation.** The score is a weighted mean of success rate (0.5), response time (0.2), and feedback (0.3), clamped to `[0, 1]`. Below `trust_threshold` the response is 403. With no history, `new_agents_allowed` decides. Required zkML, TEE, or staking proofs are checked on the validation registry.
-11. **Forward.** Payment headers, the signature, hop-by-hop headers, and bytes below `0x20` are removed. The gateway writes wallet, identity token, identity type, reputation, network, and request count. Connect timeout is at most 5 seconds. The backend read timeout is 30 seconds.
-12. **Answer.** The backend status is returned with `X-Payment-Amount` and `X-Transaction-Hash`. A backend 5xx, a connection failure (502), or a read timeout (504) marks a chain payment refundable. A prepaid debit is credited back on identity, reputation, or backend failure.
+6. **Rate limit.** A 60-second window per wallet. Over the limit the response is 429 with `Retry-After`.
+7. **Allowlist.** A non-empty endpoint `allowlist` rejects every other wallet with 403.
+8. **BeforePayment filter.** An installed `GatewayFilter` may stop the request before a quote, a debit, or a chain lookup. An empty chain does nothing.
+9. **Payment.** See below.
+10. **Identity.** The ERC-721 registry of the selected network must assign an NFT to the wallet. The result is cached for 300 seconds. `minimum_nft_age_seconds` above zero requires the NFT registration timestamp to be at least that old. Failure is 403.
+11. **Reputation.** The score is a weighted mean of success rate (0.5), response time (0.2), and feedback (0.3), clamped to `[0, 1]`. Below `trust_threshold` the response is 403. With no history, `new_agents_allowed` decides. Required zkML, TEE, or staking proofs are checked on the validation registry.
+12. **AfterIdentity filter.** A denial here credits a prepaid debit back.
+13. **Forward.** Payment headers, the signature, hop-by-hop headers, and bytes below `0x20` are removed. The gateway writes wallet, identity token, identity type, reputation, network, and request count. A `BeforeForward` filter may append headers or deny the call. Connect timeout is at most 5 seconds. The backend read timeout is 30 seconds. `/v1/auth` returns `{"allowed":true}` here and does not open a backend connection.
+14. **Answer.** The backend status is returned with `X-Payment-Amount` and `X-Transaction-Hash`. A backend 5xx, a connection failure (502), or a read timeout (504) marks a chain payment refundable. A prepaid debit is credited back on identity, reputation, filter denial, or backend failure.
 
 Header names that start with `X-Payment` or `X-402`, plus `X-Transaction-Hash` and `X-Agent-Signature`, are not forwarded.
 
@@ -71,9 +73,9 @@ Production templates keep seeds, the treasury key, RPC URLs, and contract addres
 
 ## What the process already observes
 
-Prometheus, when enabled, listens on `monitoring_port` and records request counts, payment amounts, verification latency, backend errors, cache hits, and network health. Logs on stdout are JSON. Security rejections include the wallet and the reason. Network health is refreshed every 10 seconds and gas every 60 seconds. A network that stops answering is left out of payment selection.
+Prometheus, when enabled, listens on `monitoring_port` and records request counts, payment amounts, verification latency, backend errors, cache hits, and network health. Security rejections include the wallet and the reason. Network health is refreshed every 10 seconds and gas every 60 seconds. A network that stops answering is left out of payment selection.
 
-`monitoring.opentelemetry_enabled` is parsed and written back. No trace is exported. There is no warning when CPU or memory crosses 80 percent.
+An OTLP span leaves the process only when `opentelemetry_enabled` is true and `otlp_endpoint` is an `http` or `https` URL. The flag defaults to false and the endpoint defaults to empty, so a stock configuration exports nothing. There is no warning when CPU or memory crosses 80 percent.
 
 ## Shutdown
 

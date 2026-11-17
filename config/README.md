@@ -112,8 +112,8 @@ Security and replay attack prevention:
 
 Observability and logging configuration:
 - `prometheus_enabled` - Enable Prometheus metrics exposition
-- `opentelemetry_enabled` - Enable OpenTelemetry distributed tracing
-- `otel_collector_endpoint` - OpenTelemetry collector URL (if enabled)
+- `opentelemetry_enabled` - Export one OTLP HTTP JSON span per request. Defaults to false
+- `otlp_endpoint` - Collector URL. Required when tracing is enabled, and it must be `http` or `https`. `otel_collector_endpoint` is accepted as an alias on read. Empty means no export
 - `log_level` - Logging verbosity (trace, debug, info, warn, error)
 - `json_logging` - Use structured JSON log format
 
@@ -130,12 +130,7 @@ Sensitive configuration values should be provided via environment variables:
 
 ## Hot Reload
 
-SynapseGateway watches the configuration file for changes and automatically reloads within 10 seconds. Configuration updates apply immediately to all requests, including in-flight requests.
-
-To force a reload, send `SIGHUP` signal:
-```bash
-kill -HUP $(pidof agentgateway)
-```
+SynapseGateway polls the configuration file about once a second. A valid change replaces the active configuration for the next request. A partial write is retried on the following poll. There is no reload signal. Restart the process to change the listen port.
 
 ## Security Best Practices
 

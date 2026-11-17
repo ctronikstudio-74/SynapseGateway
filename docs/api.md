@@ -6,7 +6,7 @@ Version 0.3.0. SynapseGateway is an x402 reverse proxy. An agent calls a protect
 
 | Header | Required | Meaning |
 | --- | --- | --- |
-| `X-Agent-Signature` | yes, except `GET /health` | 65-byte EIP-712 signature (`r`, `s`, `v`) over method, path, body hash, wallet, quote reference, and quote expiry. Contract wallets may send an ERC-1271 signature. A missing or non-matching signature returns HTTP 401. |
+| `X-Agent-Signature` | yes, except `GET /health` and `GET` or `POST /mcp` | 65-byte EIP-712 signature (`r`, `s`, `v`) over method, path, body hash, wallet, quote reference, and quote expiry. Contract wallets may send an ERC-1271 signature. A missing or non-matching signature returns HTTP 401. `/v1/auth` requires the signature on the original request. |
 | `X-Agent-Wallet` | yes for paid and identity checks | Checksum-free `0x` address with 40 hex digits. `X-Wallet-Address` is also accepted. |
 | `X-Payment-Tx` | required when `price_usdc > 0` and the call is not prepaid | Transaction hash of a USDC, or other configured stablecoin, transfer to the gateway wallet. |
 | `X-Agent-Proof` | when the endpoint requires zkML, TEE, or staking | Proof bytes forwarded to the validation registry. |
@@ -69,10 +69,11 @@ The agent response gains `X-Payment-Amount` and `X-Transaction-Hash`.
 
 | Code | When |
 | --- | --- |
-| 200 | Health is good, or the backend succeeded. |
+| 200 | Health is good, the backend succeeded, or `/v1/auth` allowed the call. |
+| 400 | `/v1/auth` is missing `X-Original-URI` and `X-Original-Method` (or their ForwardAuth aliases), or a JSON body is not an object the route accepts. |
 | 401 | Signature or wallet is missing. |
 | 402 | Payment is missing, pending, short, or invalid. |
-| 403 | The wallet is denied, it is outside the endpoint allowlist, the identity NFT is missing or newer than `minimum_nft_age_seconds`, or the reputation check failed. |
+| 403 | The wallet is denied, it is outside the endpoint allowlist, the identity NFT is missing or newer than `minimum_nft_age_seconds`, the reputation check failed, or a filter stopped the request. |
 | 409 | Transaction hash was already used after the 24 hour cache, or a refund was blocked. |
 | 429 | Per-wallet sliding window is full. `Retry-After` is in seconds. |
 | 502 | The backend connection failed. A verified payment is marked refundable. |

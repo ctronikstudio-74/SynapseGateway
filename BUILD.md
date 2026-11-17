@@ -1,6 +1,6 @@
 # SynapseGateway build instructions
 
-Version 0.2.0. The CMake target and the executable are both named `SynapseGateway`.
+Version 0.3.0. The CMake target and the executable are both named `SynapseGateway`. `SynapseGateway check config.toml` validates a file and prints the CREATE2 collection address without listening.
 
 ## Prerequisites
 

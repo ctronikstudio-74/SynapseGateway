@@ -54,5 +54,6 @@ bloom_filter_retention_hours = 24
 [monitoring]
 prometheus_enabled = true
 opentelemetry_enabled = false
+otlp_endpoint = ""
 log_level = "debug"
 json_logging = false
