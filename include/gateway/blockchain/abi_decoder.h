@@ -23,6 +23,9 @@ public:
     [[nodiscard]] static std::string encodeDynamicBytesCall(std::string_view signature,
                                                             std::string_view address,
                                                             std::string_view payload_hex);
+    [[nodiscard]] static std::string encodeBytes32AndBytesCall(std::string_view signature,
+                                                               std::string_view word_hex,
+                                                               std::string_view payload_hex);
 
     [[nodiscard]] static std::string encodeIdentityReturn(std::string_view identity_type,
                                                           std::uint64_t registration_timestamp);

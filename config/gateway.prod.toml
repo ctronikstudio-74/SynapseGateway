@@ -12,6 +12,8 @@ thread_pool_size = 0  # Auto-detect CPU cores
 # CRITICAL: Replace with secure seed from environment variable
 # Set AGENTGW_WALLET_SEED environment variable instead of hardcoding
 payment_wallet_seed = "${AGENTGW_WALLET_SEED}"
+# Hot key that broadcasts EIP-3009 collections and USDC refunds. It is not the CREATE2 seed.
+treasury_private_key = "${AGENTGW_TREASURY_KEY}"
 
 # Production mainnet configurations
 [[blockchain.networks]]
@@ -20,6 +22,8 @@ rpc_url = "${BASE_RPC_URL}"
 identity_registry = "${BASE_IDENTITY_REGISTRY}"
 reputation_registry = "${BASE_REPUTATION_REGISTRY}"
 validation_registry = "${BASE_VALIDATION_REGISTRY}"
+usdc_contract = "${BASE_USDC_CONTRACT}"
+usdc_decimals = 6
 gas_limit = 500000
 enabled = true
 
@@ -29,6 +33,8 @@ rpc_url = "${ARBITRUM_RPC_URL}"
 identity_registry = "${ARBITRUM_IDENTITY_REGISTRY}"
 reputation_registry = "${ARBITRUM_REPUTATION_REGISTRY}"
 validation_registry = "${ARBITRUM_VALIDATION_REGISTRY}"
+usdc_contract = "${ARBITRUM_USDC_CONTRACT}"
+usdc_decimals = 6
 gas_limit = 800000
 enabled = true
 
@@ -38,6 +44,8 @@ rpc_url = "${POLYGON_RPC_URL}"
 identity_registry = "${POLYGON_IDENTITY_REGISTRY}"
 reputation_registry = "${POLYGON_REPUTATION_REGISTRY}"
 validation_registry = "${POLYGON_VALIDATION_REGISTRY}"
+usdc_contract = "${POLYGON_USDC_CONTRACT}"
+usdc_decimals = 6
 gas_limit = 600000
 enabled = true
 

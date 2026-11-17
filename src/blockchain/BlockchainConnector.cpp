@@ -5,6 +5,9 @@
 #include "gateway/blockchain/hex.h"
 #include "gateway/blockchain/keccak.h"
 #include "gateway/blockchain/network_selection.h"
+#include "gateway/blockchain/request_signature.h"
+#include "gateway/blockchain/settlement.h"
+#include "gateway/core/validation_rules.h"
 
 #include <chrono>
 #include <stdexcept>
@@ -63,9 +66,15 @@ std::string decimalLess(const std::string& left, const std::string& right) {
 
 BlockchainConnector::BlockchainConnector(std::vector<gateway::core::BlockchainNetworkConfig> networks,
                                          std::string wallet_seed,
-                                         std::shared_ptr<RpcClient> rpc)
-    : wallet_seed_(std::move(wallet_seed)), rpc_(std::move(rpc)) {
+                                         std::shared_ptr<RpcClient> rpc,
+                                         std::string treasury_private_key)
+    : wallet_seed_(std::move(wallet_seed)), treasury_key_(std::move(treasury_private_key)), rpc_(std::move(rpc)) {
     reloadNetworkConfigs(std::move(networks));
+}
+
+void BlockchainConnector::setTreasuryKey(std::string treasury_private_key) {
+    std::unique_lock lock(mutex_);
+    treasury_key_ = std::move(treasury_private_key);
 }
 
 void BlockchainConnector::reloadNetworkConfigs(std::vector<gateway::core::BlockchainNetworkConfig> networks) {
@@ -214,11 +223,33 @@ void BlockchainConnector::refreshGasFees() {
 }
 
 TxLookup BlockchainConnector::getTransaction(const std::string& tx_hash, gateway::core::Network network) {
+    return getPaymentTransfer(tx_hash, network, {});
+}
+
+TxLookup BlockchainConnector::getPaymentTransfer(const std::string& tx_hash,
+                                                 gateway::core::Network network,
+                                                 std::string_view payer) {
     if (tx_hash.empty()) {
         return TxLookup{TxStatus::MissingMetadata, std::nullopt};
     }
     if (!supportsNetwork(network)) {
         return TxLookup{TxStatus::NetworkUnavailable, std::nullopt};
+    }
+
+    std::string usdc_contract;
+    std::vector<std::string> accepted_tokens;
+    {
+        std::shared_lock lock(mutex_);
+        const auto found = networks_.find(network);
+        if (found != networks_.end()) {
+            usdc_contract = found->second.config.usdc_contract;
+            if (!usdc_contract.empty()) {
+                accepted_tokens.push_back(usdc_contract);
+            }
+            for (const auto& coin : found->second.config.stablecoins) {
+                accepted_tokens.push_back(coin.contract);
+            }
+        }
     }
 
     try {
@@ -227,19 +258,27 @@ TxLookup BlockchainConnector::getTransaction(const std::string& tx_hash, gateway
         if (tx.is_null()) {
             return TxLookup{TxStatus::NotFound, std::nullopt};
         }
-        const std::string from = asString(tx.value("from", nlohmann::json{}));
+        std::string from = asString(tx.value("from", nlohmann::json{}));
         std::string to = asString(tx.value("to", nlohmann::json{}));
         std::string value = tx.contains("value") && tx["value"].is_string()
                                 ? hexToDecimal(tx["value"].get<std::string>())
                                 : std::string{};
+        std::string token_contract;
 
         const nlohmann::json receipt =
             rpc_->call(url, "eth_getTransactionReceipt", nlohmann::json::array({tx_hash}));
         std::string block_quantity = asString(tx.value("blockNumber", nlohmann::json{}));
         if (receipt.is_object() && receipt.contains("logs") && receipt["logs"].is_array()) {
             const std::string topic = transferTopic();
-            std::string best_amount = "0";
-            std::string best_to;
+            const std::string treasury = paymentWallet();
+            const bool settle_token = !accepted_tokens.empty();
+            std::string usdc_amount = "0";
+            std::string usdc_to;
+            std::string usdc_from;
+            std::string alt_amount = "0";
+            std::string alt_to;
+            std::string alt_from;
+            std::string alt_token;
             for (const auto& log : receipt["logs"]) {
                 if (!log.contains("topics") || !log["topics"].is_array() || log["topics"].size() < 3) {
                     continue;
@@ -247,17 +286,56 @@ TxLookup BlockchainConnector::getTransaction(const std::string& tx_hash, gateway
                 if (!sameHex(asString(log["topics"][0]), topic)) {
                     continue;
                 }
+                const std::string log_contract = asString(log.value("address", nlohmann::json{}));
+                std::string matched_token;
+                if (settle_token) {
+                    for (const std::string& accepted : accepted_tokens) {
+                        if (sameHex(log_contract, accepted)) {
+                            matched_token = accepted;
+                            break;
+                        }
+                    }
+                    if (matched_token.empty()) {
+                        continue;
+                    }
+                }
+                const std::string sender = topicAddress(asString(log["topics"][1]));
                 const std::string recipient = topicAddress(asString(log["topics"][2]));
+                if (settle_token && !sameHex(recipient, treasury)) {
+                    continue;
+                }
+                if (settle_token && !payer.empty() && !sameHex(sender, payer)) {
+                    continue;
+                }
                 const std::string amount =
                     log.contains("data") ? hexToDecimal(asString(log["data"])) : std::string("0");
-                if (decimalLess(best_amount, amount) == amount && amount != "0") {
-                    best_amount = amount;
-                    best_to = recipient;
+                const bool usdc_log = !usdc_contract.empty() && sameHex(matched_token, usdc_contract);
+                if (usdc_log || !settle_token) {
+                    if (decimalLess(usdc_amount, amount) == amount && amount != "0") {
+                        usdc_amount = amount;
+                        usdc_to = recipient;
+                        usdc_from = sender;
+                        token_contract = settle_token ? matched_token : log_contract;
+                    }
+                } else if (decimalLess(alt_amount, amount) == amount && amount != "0") {
+                    alt_amount = amount;
+                    alt_to = recipient;
+                    alt_from = sender;
+                    alt_token = matched_token.empty() ? log_contract : matched_token;
                 }
             }
-            if (!best_to.empty()) {
-                to = best_to;
-                value = best_amount;
+            if (!usdc_to.empty()) {
+                to = usdc_to;
+                from = usdc_from.empty() ? from : usdc_from;
+                value = usdc_amount;
+            } else if (!alt_to.empty()) {
+                to = alt_to;
+                from = alt_from.empty() ? from : alt_from;
+                value = alt_amount;
+                token_contract = alt_token;
+            } else if (settle_token) {
+                value = "0";
+                token_contract.clear();
             }
             if (block_quantity.empty()) {
                 block_quantity = asString(receipt.value("blockNumber", nlohmann::json{}));
@@ -271,6 +349,7 @@ TxLookup BlockchainConnector::getTransaction(const std::string& tx_hash, gateway
         parsed.hash = tx_hash;
         parsed.from_address = from;
         parsed.to_address = to;
+        parsed.token_contract = token_contract;
         parsed.value_wei = value;
         parsed.block_number = block_quantity.empty() ? 0 : hexToUint64(block_quantity);
         parsed.execution_succeeded = true;
@@ -420,6 +499,171 @@ ProofResult BlockchainConnector::verifyProofOfWork(const std::string& wallet_add
         markUnhealthy(network);
         return finish(false, ex.what());
     }
+}
+
+bool BlockchainConnector::isValidContractSignature(const std::string& wallet,
+                                                   const std::string& digest_hex,
+                                                   const std::string& signature_hex,
+                                                   gateway::core::Network network) {
+    if (!supportsNetwork(network) || !gateway::core::isValidAddress(wallet)) {
+        return false;
+    }
+    try {
+        const auto data = AbiDecoder::encodeBytes32AndBytesCall("isValidSignature(bytes32,bytes)", digest_hex,
+                                                                signature_hex);
+        const auto encoded = ethCall(network, wallet, data);
+        const auto bytes = fromHex(asString(encoded));
+        return bytes.size() >= 4 && bytes[0] == 0x16 && bytes[1] == 0x26 && bytes[2] == 0xba && bytes[3] == 0x7e;
+    } catch (const std::exception&) {
+        return false;
+    }
+}
+
+TxLookup BlockchainConnector::getTokenTransfer(const std::string& tx_hash,
+                                               gateway::core::Network network,
+                                               std::string_view token,
+                                               std::string_view sender,
+                                               std::string_view recipient) {
+    if (tx_hash.empty()) {
+        return TxLookup{TxStatus::MissingMetadata, std::nullopt};
+    }
+    if (!supportsNetwork(network)) {
+        return TxLookup{TxStatus::NetworkUnavailable, std::nullopt};
+    }
+    try {
+        const std::string url = rpcUrl(network);
+        const nlohmann::json receipt = rpc_->call(url, "eth_getTransactionReceipt", nlohmann::json::array({tx_hash}));
+        if (!receipt.is_object() || !receipt.contains("logs") || !receipt["logs"].is_array()) {
+            return TxLookup{TxStatus::NotFound, std::nullopt};
+        }
+        const std::string topic = transferTopic();
+        std::string amount = "0";
+        bool matched = false;
+        for (const auto& log : receipt["logs"]) {
+            if (!log.contains("topics") || !log["topics"].is_array() || log["topics"].size() < 3) {
+                continue;
+            }
+            if (!sameHex(asString(log["topics"][0]), topic)) {
+                continue;
+            }
+            if (!token.empty() && !sameHex(asString(log.value("address", nlohmann::json{})), token)) {
+                continue;
+            }
+            const std::string log_sender = topicAddress(asString(log["topics"][1]));
+            const std::string log_recipient = topicAddress(asString(log["topics"][2]));
+            if (!sender.empty() && !sameHex(log_sender, sender)) {
+                continue;
+            }
+            if (!recipient.empty() && !sameHex(log_recipient, recipient)) {
+                continue;
+            }
+            amount = log.contains("data") ? hexToDecimal(asString(log["data"])) : std::string("0");
+            matched = amount != "0";
+            if (matched) {
+                break;
+            }
+        }
+        if (!matched) {
+            return TxLookup{TxStatus::NotFound, std::nullopt};
+        }
+        Transaction parsed;
+        parsed.hash = tx_hash;
+        parsed.from_address = std::string(sender);
+        parsed.to_address = std::string(recipient);
+        parsed.token_contract = std::string(token);
+        parsed.value_wei = amount;
+        const std::string block_quantity = asString(receipt.value("blockNumber", nlohmann::json{}));
+        parsed.block_number = block_quantity.empty() ? 0 : hexToUint64(block_quantity);
+        const std::string status = asString(receipt.value("status", nlohmann::json{}));
+        parsed.execution_succeeded = status.empty() || hexToUint64(status) == 1;
+        const nlohmann::json latest = rpc_->call(url, "eth_blockNumber", nlohmann::json::array());
+        const auto latest_block = hexToUint64(asString(latest));
+        const auto depth = latest_block >= parsed.block_number && parsed.block_number > 0
+                               ? (latest_block - parsed.block_number + 1)
+                               : 0;
+        parsed.is_finalized = parsed.execution_succeeded && depth >= confirmationsRequired(network);
+        return TxLookup{TxStatus::Found, std::move(parsed)};
+    } catch (const std::exception&) {
+        markUnhealthy(network);
+        return TxLookup{TxStatus::NetworkUnavailable, std::nullopt};
+    }
+}
+
+Broadcast BlockchainConnector::broadcastContractCall(gateway::core::Network network,
+                                                     const std::string& contract,
+                                                     const std::vector<std::uint8_t>& data) {
+    if (!supportsNetwork(network) || !gateway::core::isValidAddress(contract)) {
+        return Broadcast{Broadcast::Status::Unavailable, {}, "payment network unavailable"};
+    }
+    std::string key;
+    std::uint64_t gas_limit = 0;
+    std::string url;
+    {
+        std::shared_lock lock(mutex_);
+        key = treasury_key_;
+        const auto found = networks_.find(network);
+        if (found == networks_.end()) {
+            return Broadcast{Broadcast::Status::Unavailable, {}, "payment network unavailable"};
+        }
+        gas_limit = found->second.config.gas_limit;
+        url = found->second.config.rpc_url;
+    }
+    if (key.empty()) {
+        return Broadcast{Broadcast::Status::NotConfigured, {}, "treasury key is not configured"};
+    }
+    const auto from = addressFromPrivateKey(key);
+    if (!from) {
+        return Broadcast{Broadcast::Status::Rejected, {}, "treasury key is invalid"};
+    }
+    try {
+        const auto nonce_json = rpc_->call(url, "eth_getTransactionCount", nlohmann::json::array({*from, "pending"}));
+        const auto gas_json = rpc_->call(url, "eth_gasPrice", nlohmann::json::array());
+        Eip1559Transaction transaction;
+        transaction.chain_id = chainIdOf(network);
+        transaction.nonce = hexToUint64(asString(nonce_json));
+        transaction.max_fee = hexToUint64(asString(gas_json));
+        transaction.max_priority_fee = transaction.max_fee;
+        transaction.gas_limit = gas_limit == 0 ? 200000 : gas_limit;
+        transaction.to = contract;
+        transaction.data = data;
+        const auto raw = signEip1559(transaction, key);
+        if (!raw) {
+            return Broadcast{Broadcast::Status::Rejected, {}, "transaction signing failed"};
+        }
+        const auto sent =
+            rpc_->call(url, "eth_sendRawTransaction", nlohmann::json::array({"0x" + toHex(*raw)}));
+        return Broadcast{Broadcast::Status::Submitted, asString(sent), {}};
+    } catch (const std::exception& ex) {
+        markUnhealthy(network);
+        return Broadcast{Broadcast::Status::Rejected, {}, ex.what()};
+    }
+}
+
+Broadcast BlockchainConnector::submitTransferAuthorization(gateway::core::Network network,
+                                                           const TransferAuthorization& authorization) {
+    std::string usdc;
+    {
+        std::shared_lock lock(mutex_);
+        const auto found = networks_.find(network);
+        if (found == networks_.end()) {
+            return Broadcast{Broadcast::Status::Unavailable, {}, "payment network unavailable"};
+        }
+        usdc = found->second.config.usdc_contract;
+    }
+    if (!gateway::core::isValidAddress(usdc)) {
+        return Broadcast{Broadcast::Status::Rejected, {}, "USDC contract is not configured"};
+    }
+    return broadcastContractCall(network, usdc, transferAuthorizationCalldata(authorization));
+}
+
+Broadcast BlockchainConnector::submitErc20Transfer(gateway::core::Network network,
+                                                   std::string_view token,
+                                                   std::string_view recipient,
+                                                   std::string_view value_units) {
+    if (!gateway::core::isValidAddress(token) || !gateway::core::isValidAddress(recipient)) {
+        return Broadcast{Broadcast::Status::Rejected, {}, "refund token or recipient is invalid"};
+    }
+    return broadcastContractCall(network, std::string(token), erc20TransferCalldata(recipient, value_units));
 }
 
 }  // namespace gateway::blockchain

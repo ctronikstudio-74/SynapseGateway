@@ -1,13 +1,17 @@
 #include "gateway/core/GatewayRouter.h"
 
 #include "gateway/blockchain/BlockchainConnector.h"
+#include "gateway/blockchain/hex.h"
 #include "gateway/blockchain/models.h"
+#include "gateway/blockchain/request_signature.h"
+#include "gateway/core/wallet_policy.h"
 #include "gateway/monitoring/MetricsCollector.h"
 
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <limits>
 #include <sstream>
 #include <stdexcept>
@@ -113,6 +117,7 @@ void GatewayRouter::applyConfiguration(std::shared_ptr<Configuration> config) {
     reputation_->updateConfiguration(config);
     if (auto* connector = dynamic_cast<gateway::blockchain::BlockchainConnector*>(blockchain_.get())) {
         connector->reloadNetworkConfigs(config->networks);
+        connector->setTreasuryKey(config->treasury_private_key);
     }
     gateway::monitoring::Logger::info("configuration reload applied to in-flight requests");
 }
@@ -205,6 +210,45 @@ GatewayResponse GatewayRouter::handle(const ForwardRequest& request) {
         return finish(json(401, R"({"error":"missing wallet address"})"), "", 0.0, 0.0);
     }
 
+    gateway::blockchain::AgentRequest signed_request;
+    signed_request.method = request.method;
+    signed_request.path = path;
+    signed_request.body = request.body;
+    signed_request.wallet = *wallet;
+    signed_request.verifying_contract = blockchain_->paymentWallet();
+    signed_request.quote_reference = headerValue(request.headers, "X-Payment-Reference").value_or("");
+    auto signature_network = blockchain_->selectOptimalNetwork().value_or(Network::BASE);
+    if (!signed_request.quote_reference.empty()) {
+        const auto quote = payment_->findQuote(signed_request.quote_reference);
+        if (!quote) {
+            gateway::monitoring::Logger::logSecurityEvent("invalid_signature", *wallet, "quote reference was not issued");
+            return finish(json(401, R"({"error":"missing or invalid request signature"})"), *wallet, 0.0, 0.0);
+        }
+        signed_request.expiry_unix = quote->expires_at_unix;
+        try {
+            signature_network = NetworkFromString(quote->network);
+        } catch (const std::exception&) {
+            return finish(json(401, R"({"error":"missing or invalid request signature"})"), *wallet, 0.0, 0.0);
+        }
+    }
+    signed_request.chain_id = gateway::blockchain::chainIdOf(signature_network);
+    const auto signature = headerValue(request.headers, "X-Agent-Signature").value_or("");
+    const auto digest = gateway::blockchain::agentRequestDigest(signed_request);
+    const auto signer = gateway::blockchain::recoverSigner(digest, signature);
+    const bool eoa_match = signer && gateway::blockchain::normalizeAddress(*signer) ==
+                                         gateway::blockchain::normalizeAddress(*wallet);
+    const bool contract_match =
+        !eoa_match && blockchain_->isValidContractSignature(*wallet, "0x" + gateway::blockchain::toHex(digest), signature,
+                                                            signature_network);
+    if (!eoa_match && !contract_match) {
+        gateway::monitoring::Logger::logSecurityEvent("invalid_signature", *wallet, "request signature does not recover the wallet");
+        return finish(json(401, R"({"error":"missing or invalid request signature"})"), *wallet, 0.0, 0.0);
+    }
+    if (walletListed(config->wallet_policy.denylist, *wallet)) {
+        gateway::monitoring::Logger::logSecurityEvent("denied_wallet", *wallet, "wallet is on the denylist");
+        return finish(json(403, R"({"error":"wallet is denied"})"), *wallet, 0.0, 0.0);
+    }
+
     if (request.method == "POST" && path == "/v1/refunds") {
         const nlohmann::json body = nlohmann::json::parse(request.body, nullptr, false);
         if (!body.is_object() || !body.contains("tx_hash") || !body.contains("wallet_address")) {
@@ -223,6 +267,20 @@ GatewayResponse GatewayRouter::handle(const ForwardRequest& request) {
                                   {"gas_fee_usdc", gas_fee},
                                   {"refund_amount_usdc", stored ? stored->refund_amount_usdc : 0.0}};
         return finish(json(200, payload.dump()), *wallet, stored ? stored->amount_usdc : 0.0, 0.0);
+    }
+
+    if (request.method == "POST" && path == "/v1/credits") {
+        const nlohmann::json body = nlohmann::json::parse(request.body, nullptr, false);
+        if (!body.is_object() || !body.contains("tx_hash")) {
+            return finish(json(400, R"({"error":"tx_hash is required"})"), *wallet, 0.0, 0.0);
+        }
+        const auto credited = payment_->creditDeposit(*wallet, body.value("tx_hash", ""));
+        if (credited.status != PaymentResponse::Status::VERIFIED) {
+            const int status = credited.status == PaymentResponse::Status::REPLAY_DETECTED ? 409 : 402;
+            return finish(json(status, nlohmann::json{{"error", credited.message}}.dump()), *wallet, 0.0, 0.0);
+        }
+        return finish(json(200, nlohmann::json{{"credited", true}, {"balance_usdc", payment_->prepaidBalance(*wallet)}}.dump()),
+                      *wallet, credited.price_usdc.value_or(0.0), 0.0);
     }
 
     const EndpointConfig& endpoint = matchEndpoint(*config, path);
@@ -246,15 +304,38 @@ GatewayResponse GatewayRouter::handle(const ForwardRequest& request) {
             payment_request.tx_hash = *tx_hash;
         }
     }
+    if (const auto reference = headerValue(request.headers, "X-Payment-Reference")) {
+        payment_request.tx_reference = *reference;
+    }
 
-    if (endpoint.price_usdc > 0.0 && !payment_request.tx_hash) {
+    if (!endpoint.allowlist.empty() && !walletListed(endpoint.allowlist, *wallet)) {
+        gateway::monitoring::Logger::logSecurityEvent("allowlist", *wallet, "wallet is not on the endpoint allowlist");
+        return finish(json(403, R"({"error":"wallet is not on the endpoint allowlist"})"), *wallet, endpoint.price_usdc, 0.0);
+    }
+
+    const bool prepaid_mode = endpoint.price_usdc > 0.0 && endpoint.gas_budget_usdc > endpoint.price_usdc;
+    bool debited = false;
+    if (prepaid_mode) {
+        if (!payment_->tryDebitPrepaid(*wallet, endpoint.price_usdc)) {
+            nlohmann::json payload = {{"error", "payment required"},
+                                      {"price_usdc", endpoint.price_usdc},
+                                      {"balance_usdc", payment_->prepaidBalance(*wallet)},
+                                      {"top_up", "POST /v1/credits"}};
+            return finish(json(402, payload.dump()), *wallet, endpoint.price_usdc, 0.0);
+        }
+        debited = true;
+    }
+    const auto authorization_header = headerValue(request.headers, "X-Payment-Authorization");
+    if (!debited && endpoint.price_usdc > 0.0 && !payment_request.tx_hash && !authorization_header) {
         const PaymentResponse quote = payment_->requestPayment(payment_request);
         nlohmann::json payload = {{"error", "payment required"},
                                   {"price_usdc", quote.price_usdc.value_or(endpoint.price_usdc)},
                                   {"payment_wallet", quote.payment_wallet.value_or("")},
                                   {"network", quote.preferred_network.value_or("")},
                                   {"transaction_reference", quote.transaction_reference.value_or("")},
-                                  {"payment_header", "X-Payment-Tx"}};
+                                  {"expires_at_unix", quote.expires_at_unix.value_or(0)},
+                                  {"payment_header", "X-Payment-Tx"},
+                                  {"quote_header", "X-Payment-Reference"}};
         if (metrics_) {
             metrics_->recordPayment(blockchain_->selectOptimalNetwork().value_or(Network::BASE), endpoint.price_usdc,
                                     false);
@@ -263,8 +344,36 @@ GatewayResponse GatewayRouter::handle(const ForwardRequest& request) {
     }
 
     const auto verification_started = now();
-    const PaymentResponse verified = payment_->verifyPayment(payment_request, endpoint.price_usdc, current);
+    PaymentResponse verified;
+    if (debited || endpoint.price_usdc == 0.0) {
+        verified.status = PaymentResponse::Status::VERIFIED;
+        verified.message = debited ? "prepaid balance debited" : "zero-price endpoint";
+    } else if (authorization_header) {
+        const nlohmann::json authorization_json = nlohmann::json::parse(*authorization_header, nullptr, false);
+        gateway::blockchain::TransferAuthorization authorization;
+        if (!authorization_json.is_object()) {
+            verified.status = PaymentResponse::Status::INVALID_TRANSACTION;
+            verified.message = "authorization payload is invalid";
+        } else {
+            authorization.from = *wallet;
+            authorization.to = authorization_json.value("to", "");
+            authorization.value_units = authorization_json.value("value", "");
+            authorization.valid_after = authorization_json.value("valid_after", static_cast<std::uint64_t>(0));
+            authorization.valid_before = authorization_json.value("valid_before", static_cast<std::uint64_t>(0));
+            authorization.nonce_hex = authorization_json.value("nonce", "");
+            authorization.signature_hex = authorization_json.value("signature", "");
+            verified = payment_->settleAuthorization(payment_request, authorization, endpoint.price_usdc, current);
+        }
+    } else {
+        verified = payment_->verifyPayment(payment_request, endpoint.price_usdc, current);
+    }
+    if (verified.settled_tx_hash && !verified.settled_tx_hash->empty()) {
+        payment_request.tx_hash = verified.settled_tx_hash;
+    }
     if (verified.status != PaymentResponse::Status::VERIFIED) {
+        if (debited) {
+            payment_->creditPrepaid(*wallet, endpoint.price_usdc);
+        }
         const int status = verified.status == PaymentResponse::Status::REPLAY_DETECTED ? 409 : 402;
         if (status == 409) {
             gateway::monitoring::Logger::logSecurityEvent("replay", *wallet, verified.message);
@@ -279,13 +388,28 @@ GatewayResponse GatewayRouter::handle(const ForwardRequest& request) {
     const auto network = blockchain_->selectOptimalNetwork().value_or(Network::BASE);
     const auto identity = identity_->verifyIdentity(*wallet, network);
     if (identity.status != IdentityVerificationResult::Status::VERIFIED || !identity.identity_data) {
+        if (debited) {
+            payment_->creditPrepaid(*wallet, endpoint.price_usdc);
+        }
         return finish(json(403, nlohmann::json{{"error", "identity verification failed"}, {"detail", identity.message}}.dump()),
                       *wallet, endpoint.price_usdc, 0.0);
+    }
+    const auto unix_now = static_cast<std::uint64_t>(
+        std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count());
+    if (!nftMeetsMinimumAge(identity.identity_data->registration_timestamp, config->wallet_policy.minimum_nft_age_seconds,
+                            unix_now)) {
+        if (debited) {
+            payment_->creditPrepaid(*wallet, endpoint.price_usdc);
+        }
+        return finish(json(403, R"({"error":"identity NFT is newer than the minimum age"})"), *wallet, endpoint.price_usdc, 0.0);
     }
 
     const auto proof = headerValue(request.headers, "X-Agent-Proof").value_or("");
     const auto reputation = reputation_->checkReputation(*wallet, network, path, proof);
     if (reputation.status != ReputationCheckResult::Status::APPROVED) {
+        if (debited) {
+            payment_->creditPrepaid(*wallet, endpoint.price_usdc);
+        }
         return finish(json(403, nlohmann::json{{"error", "reputation check failed"}, {"detail", reputation.message}}.dump()),
                       *wallet, endpoint.price_usdc, reputation.composite_trust_score);
     }
@@ -316,7 +440,9 @@ GatewayResponse GatewayRouter::handle(const ForwardRequest& request) {
     const ForwardResult backend = backend_->forward(endpoint.backend_url, outbound, connect_timeout, std::chrono::seconds{30});
     const std::string tx_hash = payment_request.tx_hash.value_or("");
     if (backend.kind == ForwardResult::Kind::ConnectionFailed) {
-        if (!tx_hash.empty()) {
+        if (debited) {
+            payment_->creditPrepaid(*wallet, endpoint.price_usdc);
+        } else if (!tx_hash.empty()) {
             payment_->markRefundable(tx_hash, *wallet, endpoint.price_usdc, "backend_connection_failed");
         }
         if (metrics_) {
@@ -326,7 +452,9 @@ GatewayResponse GatewayRouter::handle(const ForwardRequest& request) {
                       reputation.composite_trust_score);
     }
     if (backend.kind == ForwardResult::Kind::Timeout) {
-        if (!tx_hash.empty()) {
+        if (debited) {
+            payment_->creditPrepaid(*wallet, endpoint.price_usdc);
+        } else if (!tx_hash.empty()) {
             payment_->markRefundable(tx_hash, *wallet, endpoint.price_usdc, "backend_timeout");
         }
         if (metrics_) {
@@ -355,7 +483,9 @@ GatewayResponse GatewayRouter::handle(const ForwardRequest& request) {
     }
     response.headers.push_back(HttpHeader{"X-Payment-Amount", std::to_string(endpoint.price_usdc)});
     response.headers.push_back(HttpHeader{"X-Transaction-Hash", tx_hash});
-    if (backend.status >= 500 && !tx_hash.empty()) {
+    if (backend.status >= 500 && debited) {
+        payment_->creditPrepaid(*wallet, endpoint.price_usdc);
+    } else if (backend.status >= 500 && !tx_hash.empty()) {
         payment_->markRefundable(tx_hash, *wallet, endpoint.price_usdc, "backend_5xx");
         if (metrics_) {
             metrics_->recordError("backend_5xx");

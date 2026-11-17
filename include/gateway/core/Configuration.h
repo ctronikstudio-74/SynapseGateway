@@ -45,8 +45,10 @@ enum class ProofType {
 struct EndpointConfig {
     std::string path_pattern;           ///< Regex pattern for endpoint matching (e.g., "/api/v1/.*")
     double price_usdc;                  ///< Price per request in USDC (decimal precision)
+    double gas_budget_usdc = 0.0;       ///< When this exceeds price_usdc, calls debit prepaid credit instead
     double trust_threshold;             ///< Minimum reputation score (0.0 - 1.0) for authorization
     std::vector<ProofType> required_proofs; ///< Required proof-of-work types (combinations allowed)
+    std::vector<std::string> allowlist; ///< Empty accepts every wallet; otherwise the wallet must be listed
     std::string backend_url;            ///< Target backend API URL
     std::chrono::seconds backend_timeout{5}; ///< Backend connection timeout
     uint32_t rate_limit_per_minute;     ///< Maximum requests per minute per wallet address
@@ -66,12 +68,31 @@ struct EndpointConfig {
  * 
  * Requirements: 3.1, 3.3, 14.4
  */
+/**
+ * @brief Extra stablecoin accepted at the same numeric price as USDC.
+ *
+ * USDC stays the default settlement token. These contracts are accepted on
+ * hash payments and credit deposits. Refunds and EIP-3009 collection stay on USDC.
+ */
+struct StablecoinConfig {
+    std::string symbol;
+    std::string contract;
+    uint32_t decimals = 6;
+
+    bool operator==(const StablecoinConfig& other) const = default;
+};
+
 struct BlockchainNetworkConfig {
     Network network;                    ///< Network identifier
     std::string rpc_url;                ///< JSON-RPC endpoint URL (HTTP or WebSocket)
     std::string identity_registry;      ///< ERC-721 identity registry contract address
     std::string reputation_registry;    ///< Reputation registry contract address
     std::string validation_registry;    ///< Validation registry contract address (zkML, TEE, staking)
+    std::string usdc_contract;          ///< ERC-20 USDC contract; only its Transfer logs settle a payment
+    uint32_t usdc_decimals = 6;         ///< Base-unit decimals of that USDC contract
+    std::string usdc_eip712_name = "USD Coin"; ///< EIP-3009 domain name
+    std::string usdc_eip712_version = "2";     ///< EIP-3009 domain version
+    std::vector<StablecoinConfig> stablecoins; ///< Additional accepted tokens, each with its own decimals
     uint64_t gas_limit;                 ///< Maximum gas limit for transactions
     bool enabled;                       ///< Network availability flag
 
@@ -110,8 +131,15 @@ struct CacheConfig {
 };
 
 /**
- * @brief Security configuration settings
+ * @brief Wallet admission rules reloaded with the TOML file.
  */
+struct WalletPolicy {
+    std::vector<std::string> denylist;          ///< Wallets rejected before payment, refunds, and credits
+    uint64_t minimum_nft_age_seconds = 0;       ///< Zero disables the age check
+
+    bool operator==(const WalletPolicy& other) const = default;
+};
+
 struct SecurityConfig {
     uint32_t bloom_filter_size_mb;      ///< Bloom filter size for replay attack prevention
     std::chrono::hours bloom_filter_retention{720}; ///< Transaction hash retention period (30 days)
@@ -137,7 +165,7 @@ struct MonitoringConfig {
 };
 
 /**
- * @brief Complete AgentGateway configuration
+ * @brief Complete SynapseGateway configuration
  * 
  * Aggregates all configuration sections for the gateway system.
  * Supports loading from TOML files and hot-reload during runtime.
@@ -151,6 +179,8 @@ struct Configuration {
     // Blockchain configuration
     std::vector<BlockchainNetworkConfig> networks;
     std::string payment_wallet_seed;    ///< Seed for deterministic wallet generation (CREATE2)
+    std::string treasury_private_key;   ///< Hot key that pays gas and sends refunds. It is not the CREATE2 seed.
+    WalletPolicy wallet_policy;
 
     // Endpoint configuration
     std::vector<EndpointConfig> endpoints;

@@ -1,4 +1,6 @@
 #include "gateway/blockchain/BlockchainConnector.h"
+#include "gateway/blockchain/hex.h"
+#include "gateway/blockchain/request_signature.h"
 #include "gateway/blockchain/network_monitor.h"
 #include "gateway/core/GatewayRouter.h"
 #include "gateway/http/HttpServer.h"
@@ -13,6 +15,8 @@
 #include <boost/beast/core.hpp>
 #include <boost/beast/http.hpp>
 
+#include <nlohmann/json.hpp>
+
 #include <atomic>
 #include <chrono>
 #include <filesystem>
@@ -23,8 +27,27 @@
 
 namespace {
 
-const std::string kWallet = "0x2222222222222222222222222222222222222222";
-const std::string kSignature(64, 'a');
+const std::string kPrivateKey = "0x0000000000000000000000000000000000000000000000000000000000000001";
+const std::string kOtherKey = "0x0000000000000000000000000000000000000000000000000000000000000002";
+const std::string kTreasury = "0x1111111111111111111111111111111111111111";
+
+std::string agentAddress(const std::string& key) {
+    return gateway::blockchain::addressFromPrivateKey(key).value_or("");
+}
+
+std::string signedHeader(const std::string& method, const std::string& path, const std::string& key,
+                         const std::string& quote = {}, std::uint64_t expiry = 0, const std::string& body = {}) {
+    gateway::blockchain::AgentRequest signed_request;
+    signed_request.method = method;
+    signed_request.path = path;
+    signed_request.body = body;
+    signed_request.wallet = agentAddress(key);
+    signed_request.quote_reference = quote;
+    signed_request.expiry_unix = expiry;
+    signed_request.chain_id = gateway::blockchain::chainIdOf(gateway::core::Network::BASE);
+    signed_request.verifying_contract = kTreasury;
+    return gateway::blockchain::signAgentRequest(key, signed_request).value_or("");
+}
 
 struct RawResponse {
     int status = 0;
@@ -171,7 +194,7 @@ TEST(GatewayFlow, HttpPipelineCoversPaymentIdentityAndRefunds) {
     chain->identity.status = gateway::blockchain::LookupStatus::Found;
     gateway::blockchain::IdentityNFT nft;
     nft.token_id = "9";
-    nft.owner_address = kWallet;
+    nft.owner_address = agentAddress(kPrivateKey);
     nft.identity_type = "agent";
     chain->identity.nft = nft;
     chain->reputation.status = gateway::blockchain::LookupStatus::Found;
@@ -237,12 +260,14 @@ TEST(GatewayFlow, HttpPipelineCoversPaymentIdentityAndRefunds) {
     const auto health = request(config->server.listen_port, "GET", "/health", "", {});
     EXPECT_EQ(health.status, 200);
 
-    const auto unsigned_call = request(config->server.listen_port, "GET", "/api/free", "", {{"X-Agent-Wallet", kWallet}});
+    const auto unsigned_call =
+        request(config->server.listen_port, "GET", "/api/free", "", {{"X-Agent-Wallet", agentAddress(kPrivateKey)}});
     EXPECT_EQ(unsigned_call.status, 401);
 
-    const std::vector<std::pair<std::string, std::string>> headers = {{"X-Agent-Signature", kSignature},
-                                                                      {"X-Agent-Wallet", kWallet},
-                                                                      {"Accept", "application/json"}};
+    const std::vector<std::pair<std::string, std::string>> headers = {
+        {"X-Agent-Signature", signedHeader("GET", "/api/free", kPrivateKey)},
+        {"X-Agent-Wallet", agentAddress(kPrivateKey)},
+        {"Accept", "application/json"}};
     const auto allowed = request(config->server.listen_port, "GET", "/api/free", "", headers);
     EXPECT_EQ(allowed.status, 200);
     EXPECT_EQ(allowed.body, "pong");
@@ -255,27 +280,31 @@ TEST(GatewayFlow, HttpPipelineCoversPaymentIdentityAndRefunds) {
     }
     EXPECT_TRUE(metadata);
 
-    const auto quote = request(config->server.listen_port, "GET", "/api/paid", "", headers);
+    const std::vector<std::pair<std::string, std::string>> paid_quote_headers = {
+        {"X-Agent-Signature", signedHeader("GET", "/api/paid", kPrivateKey)},
+        {"X-Agent-Wallet", agentAddress(kPrivateKey)},
+        {"Accept", "application/json"}};
+    const auto quote = request(config->server.listen_port, "GET", "/api/paid", "", paid_quote_headers);
     EXPECT_EQ(quote.status, 402);
     EXPECT_NE(quote.body.find("0.001"), std::string::npos);
 
     auto updated = std::make_shared<gateway::core::Configuration>(*config);
     updated->endpoints[1].price_usdc = 0.25;
     router.applyConfiguration(updated);
-    const auto requote = request(config->server.listen_port, "GET", "/api/paid", "", headers);
+    const auto requote = request(config->server.listen_port, "GET", "/api/paid", "", paid_quote_headers);
     EXPECT_EQ(requote.status, 402);
     EXPECT_NE(requote.body.find("0.25"), std::string::npos);
 
     chain->identity.status = gateway::blockchain::LookupStatus::NotFound;
     chain->identity.nft.reset();
     const auto forbidden = request(config->server.listen_port, "GET", "/api/free", "",
-                                   {{"X-Agent-Signature", kSignature},
-                                    {"X-Agent-Wallet", "0x4444444444444444444444444444444444444444"}});
+                                   {{"X-Agent-Signature", signedHeader("GET", "/api/free", kOtherKey)},
+                                    {"X-Agent-Wallet", agentAddress(kOtherKey)}});
     EXPECT_EQ(forbidden.status, 403);
 
     gateway::blockchain::Transaction payment_tx;
     payment_tx.to_address = chain->wallet;
-    payment_tx.from_address = kWallet;
+    payment_tx.from_address = agentAddress(kPrivateKey);
     payment_tx.value_wei = "1000";
     payment_tx.is_finalized = true;
     chain->transaction.status = gateway::blockchain::TxStatus::Found;
@@ -286,13 +315,24 @@ TEST(GatewayFlow, HttpPipelineCoversPaymentIdentityAndRefunds) {
     broken->endpoints[1].backend_url = "http://127.0.0.1:1";
     broken->endpoints[1].price_usdc = 0.001;
     router.applyConfiguration(broken);
-    auto paid_headers = headers;
-    paid_headers.emplace_back("X-Payment-Tx", "0xrefund");
+    const auto quoted = nlohmann::json::parse(quote.body);
+    const std::string reference = quoted.at("transaction_reference").get<std::string>();
+    const auto quote_expiry = quoted.at("expires_at_unix").get<std::uint64_t>();
+    std::vector<std::pair<std::string, std::string>> paid_headers = {
+        {"X-Agent-Signature", signedHeader("POST", "/api/paid", kPrivateKey, reference, quote_expiry)},
+        {"X-Agent-Wallet", agentAddress(kPrivateKey)},
+        {"Accept", "application/json"},
+        {"X-Payment-Tx", "0xrefund"},
+        {"X-Payment-Reference", reference}};
     const auto unavailable = request(config->server.listen_port, "POST", "/api/paid", "", paid_headers);
     EXPECT_EQ(unavailable.status, 502);
-    const auto refund = request(config->server.listen_port, "POST", "/v1/refunds",
-                                R"({"tx_hash":"0xrefund","wallet_address":"0x2222222222222222222222222222222222222222","gas_fee_usdc":0.0001})",
-                                headers);
+    const std::string refund_body = std::string("{\"tx_hash\":\"0xrefund\",\"wallet_address\":\"") +
+                                    agentAddress(kPrivateKey) + "\",\"gas_fee_usdc\":0.0001}";
+    const std::vector<std::pair<std::string, std::string>> refund_headers = {
+        {"X-Agent-Signature", signedHeader("POST", "/v1/refunds", kPrivateKey, {}, 0, refund_body)},
+        {"X-Agent-Wallet", agentAddress(kPrivateKey)},
+        {"Accept", "application/json"}};
+    const auto refund = request(config->server.listen_port, "POST", "/v1/refunds", refund_body, refund_headers);
     EXPECT_EQ(refund.status, 200);
     EXPECT_NE(refund.body.find("refunded"), std::string::npos);
 

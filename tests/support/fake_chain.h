@@ -51,6 +51,35 @@ public:
     bool supportsNetwork(gateway::core::Network) const override { return supported; }
     std::optional<gateway::core::Network> selectOptimalNetwork() const override { return optimal; }
     std::string paymentWallet() const override { return wallet; }
+
+    gateway::blockchain::Broadcast authorization_broadcast{};
+    gateway::blockchain::Broadcast transfer_broadcast{};
+    gateway::blockchain::TxLookup token_transfer{};
+    bool script_token_transfer = false;
+
+    gateway::blockchain::Broadcast submitTransferAuthorization(
+        gateway::core::Network,
+        const gateway::blockchain::TransferAuthorization&) override {
+        return authorization_broadcast;
+    }
+
+    gateway::blockchain::Broadcast submitErc20Transfer(gateway::core::Network,
+                                                      std::string_view,
+                                                      std::string_view,
+                                                      std::string_view) override {
+        return transfer_broadcast;
+    }
+
+    gateway::blockchain::TxLookup getTokenTransfer(const std::string&,
+                                                  gateway::core::Network,
+                                                  std::string_view,
+                                                  std::string_view,
+                                                  std::string_view) override {
+        if (script_token_transfer) {
+            return token_transfer;
+        }
+        return gateway::blockchain::BlockchainQuery::getTokenTransfer({}, {}, {}, {}, {});
+    }
 };
 
 }  // namespace gateway::test

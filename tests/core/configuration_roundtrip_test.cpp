@@ -75,6 +75,8 @@ Configuration sample(std::mt19937& rng) {
         network.identity_registry = address(0x1000ULL + static_cast<unsigned>(i));
         network.reputation_registry = address(0x2000ULL + static_cast<unsigned>(i));
         network.validation_registry = address(0x3000ULL + static_cast<unsigned>(i));
+        network.usdc_contract = address(0x4000ULL + static_cast<unsigned>(i));
+        network.usdc_decimals = 6;
         network.gas_limit = 100000;
         network.enabled = coin(rng) == 1;
         config.networks.push_back(network);
@@ -137,6 +139,8 @@ rpc_url = "https://mainnet.base.org"
 identity_registry = "0x0000000000000000000000000000000000000001"
 reputation_registry = "0x0000000000000000000000000000000000000001"
 validation_registry = "0x0000000000000000000000000000000000000001"
+usdc_contract = "0x0000000000000000000000000000000000000001"
+usdc_decimals = 6
 gas_limit = 10
 enabled = true
 

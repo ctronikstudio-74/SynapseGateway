@@ -1,3 +1,4 @@
+#include "gateway/blockchain/request_signature.h"
 #include "gateway/core/GatewayRouter.h"
 
 #include "../support/fake_chain.h"
@@ -38,7 +39,8 @@ TEST(PerformanceBenchmark, VerificationStaysInsideTheLatencyBudget) {
     chain->identity.status = gateway::blockchain::LookupStatus::Found;
     gateway::blockchain::IdentityNFT nft;
     nft.token_id = "1";
-    nft.owner_address = "0x2222222222222222222222222222222222222222";
+    const std::string private_key = "0x0000000000000000000000000000000000000000000000000000000000000001";
+    nft.owner_address = gateway::blockchain::addressFromPrivateKey(private_key).value_or("");
     nft.identity_type = "agent";
     chain->identity.nft = nft;
     chain->reputation.status = gateway::blockchain::LookupStatus::Found;
@@ -69,10 +71,18 @@ TEST(PerformanceBenchmark, VerificationStaysInsideTheLatencyBudget) {
     gateway::core::GatewayRouter router(config, payment, identity, reputation_checker, chain,
                                        std::make_shared<InstantBackend>());
 
+    gateway::blockchain::AgentRequest signed_request;
+    signed_request.method = "GET";
+    signed_request.path = "/api/free";
+    signed_request.wallet = nft.owner_address;
+    signed_request.chain_id = gateway::blockchain::chainIdOf(gateway::core::Network::BASE);
+    signed_request.verifying_contract = chain->wallet;
+    const auto signature = gateway::blockchain::signAgentRequest(private_key, signed_request);
+    ASSERT_TRUE(signature);
     gateway::core::ForwardRequest request;
     request.method = "GET";
     request.target = "/api/free";
-    request.headers.push_back({"X-Agent-Signature", std::string(64, 'b')});
+    request.headers.push_back({"X-Agent-Signature", *signature});
     request.headers.push_back({"X-Agent-Wallet", nft.owner_address});
 
     constexpr int kRequests = 2000;
@@ -103,6 +113,12 @@ TEST(PerformanceBenchmark, VerificationStaysInsideTheLatencyBudget) {
     paid.endpoint_path = "/api/free";
     paid.wallet_address = nft.owner_address;
     paid.tx_hash = "0xcache";
+    config->endpoints[0].price_usdc = 0.001;
+    config->default_endpoint.price_usdc = 0.001;
+    payment->updateConfiguration(config);
+    const auto quote = payment->requestPayment(paid);
+    ASSERT_TRUE(quote.transaction_reference);
+    paid.tx_reference = *quote.transaction_reference;
     chain->transaction.status = gateway::blockchain::TxStatus::Found;
     gateway::blockchain::Transaction tx;
     tx.to_address = chain->wallet;

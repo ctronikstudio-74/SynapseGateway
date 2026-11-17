@@ -16,6 +16,7 @@ struct Transaction {
     std::string hash;
     std::string from_address;
     std::string to_address;
+    std::string token_contract;
     std::string value_wei;
     uint64_t block_number = 0;
     uint64_t timestamp = 0;
@@ -88,6 +89,7 @@ struct RefundableTransaction {
     std::string reason;
     uint64_t refund_requested_at = 0;
     bool refund_processed = false;
+    std::string refund_tx_hash;
 
     bool operator==(const RefundableTransaction& other) const = default;
 };

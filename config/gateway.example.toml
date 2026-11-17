@@ -25,6 +25,14 @@ rpc_url = "https://mainnet.base.org"
 identity_registry = "0x0000000000000000000000000000000000000000"
 reputation_registry = "0x0000000000000000000000000000000000000000"
 validation_registry = "0x0000000000000000000000000000000000000000"
+usdc_contract = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
+usdc_decimals = 6
+# Extra stablecoins settle the same numeric price using their own decimals.
+# USDC remains the default for EIP-3009 collection and refunds.
+stablecoins = [
+    { symbol = "USDT", contract = "0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2", decimals = 6 },
+    { symbol = "EURC", contract = "0x60a3E35Cc302bFA44Cb288Bc5a4F316Fdb1adb42", decimals = 6 }
+]
 gas_limit = 500000
 enabled = true
 
@@ -34,6 +42,8 @@ rpc_url = "https://arb1.arbitrum.io/rpc"
 identity_registry = "0x0000000000000000000000000000000000000000"
 reputation_registry = "0x0000000000000000000000000000000000000000"
 validation_registry = "0x0000000000000000000000000000000000000000"
+usdc_contract = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831"
+usdc_decimals = 6
 gas_limit = 800000
 enabled = true
 
@@ -43,6 +53,8 @@ rpc_url = "https://polygon-rpc.com"
 identity_registry = "0x0000000000000000000000000000000000000000"
 reputation_registry = "0x0000000000000000000000000000000000000000"
 validation_registry = "0x0000000000000000000000000000000000000000"
+usdc_contract = "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359"
+usdc_decimals = 6
 gas_limit = 600000
 enabled = true
 
@@ -52,6 +64,8 @@ rpc_url = "https://eth-mainnet.g.alchemy.com/v2/your-api-key"
 identity_registry = "0x0000000000000000000000000000000000000000"
 reputation_registry = "0x0000000000000000000000000000000000000000"
 validation_registry = "0x0000000000000000000000000000000000000000"
+usdc_contract = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+usdc_decimals = 6
 gas_limit = 1000000
 enabled = false
 
@@ -61,8 +75,15 @@ rpc_url = "https://bsc-dataseed1.binance.org"
 identity_registry = "0x0000000000000000000000000000000000000000"
 reputation_registry = "0x0000000000000000000000000000000000000000"
 validation_registry = "0x0000000000000000000000000000000000000000"
+usdc_contract = "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d"
+usdc_decimals = 18
 gas_limit = 500000
 enabled = false
+
+# Hot-reloaded with the rest of the file. An empty denylist and a zero age add no restriction.
+[wallet_policy]
+denylist = []
+minimum_nft_age_seconds = 0
 
 # Endpoint-specific configurations
 [[endpoints]]
@@ -89,6 +110,9 @@ rate_limit_per_minute = 100
 
 # Allow agents without reputation history
 new_agents_allowed = true
+
+# Empty allowlist accepts every wallet that passes the other checks.
+allowlist = []
 
 [[endpoints]]
 path_pattern = "/api/v1/premium/.*"

@@ -1,5 +1,6 @@
 #include "gateway/core/ConfigurationManager.h"
 
+#include "gateway/blockchain/hex.h"
 #include "gateway/core/validation_rules.h"
 
 #include <chrono>
@@ -194,6 +195,25 @@ EndpointConfig readEndpoint(const toml::table& table, bool require_path) {
     endpoint.backend_timeout = readSeconds(table, "backend_timeout");
     endpoint.rate_limit_per_minute = readUint32(table, "rate_limit_per_minute");
     endpoint.new_agents_allowed = readBool(table, "new_agents_allowed");
+    if (table.get("gas_budget_usdc") != nullptr) {
+        endpoint.gas_budget_usdc = readDouble(table, "gas_budget_usdc");
+    }
+    if (const toml::node* allowlist = table.get("allowlist")) {
+        const toml::array* addresses = allowlist->as_array();
+        if (addresses == nullptr) {
+            throw ParseError(at(*allowlist, "key 'allowlist' must be an array of addresses"));
+        }
+        for (const toml::node& item : *addresses) {
+            const auto address = item.value<std::string>();
+            if (!address || !isValidAddress(*address)) {
+                throw ParseError(at(item, "allowlist entries must be 0x-prefixed 20-byte addresses"));
+            }
+            endpoint.allowlist.push_back(*address);
+        }
+    }
+    if (endpoint.gas_budget_usdc < 0.0) {
+        throw ParseError(at(requireKey(table, "gas_budget_usdc"), "key 'gas_budget_usdc' must be >= 0"));
+    }
     if (require_path && endpoint.path_pattern.empty()) {
         throw ParseError(at(requireKey(table, "path_pattern"), "key 'path_pattern' must be non-empty"));
     }
@@ -229,6 +249,14 @@ BlockchainNetworkConfig readNetworkConfig(const toml::table& table) {
     network.identity_registry = readString(table, "identity_registry");
     network.reputation_registry = readString(table, "reputation_registry");
     network.validation_registry = readString(table, "validation_registry");
+    network.usdc_contract = readString(table, "usdc_contract");
+    network.usdc_decimals = readUint32(table, "usdc_decimals");
+    if (table.get("usdc_eip712_name") != nullptr) {
+        network.usdc_eip712_name = readString(table, "usdc_eip712_name");
+    }
+    if (table.get("usdc_eip712_version") != nullptr) {
+        network.usdc_eip712_version = readString(table, "usdc_eip712_version");
+    }
     network.gas_limit = readUint64(table, "gas_limit");
     network.enabled = readBool(table, "enabled");
     if (!isValidRpcUrl(network.rpc_url)) {
@@ -246,8 +274,53 @@ BlockchainNetworkConfig readNetworkConfig(const toml::table& table) {
         throw ParseError(at(requireKey(table, "validation_registry"),
                             "key 'validation_registry' must be a 0x-prefixed 20-byte address"));
     }
+    if (!isValidAddress(network.usdc_contract)) {
+        throw ParseError(at(requireKey(table, "usdc_contract"),
+                            "key 'usdc_contract' must be a 0x-prefixed 20-byte address"));
+    }
+    if (network.usdc_decimals < 1 || network.usdc_decimals > 18) {
+        throw ParseError(at(requireKey(table, "usdc_decimals"), "key 'usdc_decimals' must be in [1, 18]"));
+    }
+    if (network.usdc_eip712_name.empty() || network.usdc_eip712_version.empty()) {
+        throw ParseError(at(table, "usdc_eip712_name and usdc_eip712_version must be non-empty"));
+    }
     if (network.gas_limit == 0) {
         throw ParseError(at(requireKey(table, "gas_limit"), "key 'gas_limit' must be > 0"));
+    }
+    if (const toml::node* extra = table.get("stablecoins")) {
+        const toml::array* coins = extra->as_array();
+        if (coins == nullptr) {
+            throw ParseError(at(*extra, "key 'stablecoins' must be an array of tables"));
+        }
+        for (const toml::node& item : *coins) {
+            const toml::table* row = item.as_table();
+            if (row == nullptr) {
+                throw ParseError(at(item, "stablecoin entries must be tables"));
+            }
+            StablecoinConfig coin;
+            coin.symbol = readString(*row, "symbol");
+            coin.contract = readString(*row, "contract");
+            coin.decimals = readUint32(*row, "decimals");
+            if (coin.symbol.empty() || coin.symbol == "USDC" || coin.symbol == "usdc") {
+                throw ParseError(at(*row, "stablecoin symbol must be non-empty and distinct from USDC"));
+            }
+            if (!isValidAddress(coin.contract) ||
+                gateway::blockchain::normalizeAddress(coin.contract) ==
+                    gateway::blockchain::normalizeAddress(network.usdc_contract)) {
+                throw ParseError(at(*row, "stablecoin contract must be a distinct 0x-prefixed 20-byte address"));
+            }
+            if (coin.decimals < 1 || coin.decimals > 18) {
+                throw ParseError(at(*row, "stablecoin decimals must be in [1, 18]"));
+            }
+            for (const StablecoinConfig& existing : network.stablecoins) {
+                if (existing.symbol == coin.symbol ||
+                    gateway::blockchain::normalizeAddress(existing.contract) ==
+                        gateway::blockchain::normalizeAddress(coin.contract)) {
+                    throw ParseError(at(*row, "duplicate stablecoin"));
+                }
+            }
+            network.stablecoins.push_back(std::move(coin));
+        }
     }
     return network;
 }
@@ -257,6 +330,23 @@ void readBlockchain(const toml::table& root, Configuration& config) {
     config.payment_wallet_seed = readString(table, "payment_wallet_seed");
     if (config.payment_wallet_seed.empty()) {
         throw ParseError(at(requireKey(table, "payment_wallet_seed"), "key 'payment_wallet_seed' must be non-empty"));
+    }
+    if (table.get("treasury_private_key") != nullptr) {
+        config.treasury_private_key = readString(table, "treasury_private_key");
+        const auto& key = config.treasury_private_key;
+        const bool prefixed = key.empty() || (key.size() == 66 && key[0] == '0' && (key[1] == 'x' || key[1] == 'X'));
+        bool hex = prefixed;
+        bool nonzero = key.empty();
+        for (std::size_t index = 2; hex && index < key.size(); ++index) {
+            const char character = key[index];
+            hex = (character >= '0' && character <= '9') || (character >= 'a' && character <= 'f') ||
+                  (character >= 'A' && character <= 'F');
+            nonzero = nonzero || character != '0';
+        }
+        if (!hex || !nonzero) {
+            throw ParseError(at(requireKey(table, "treasury_private_key"),
+                                "key 'treasury_private_key' must be a non-zero 32-byte hex key"));
+        }
     }
     const toml::array& networks = requireArray(table, "networks");
     config.networks.reserve(networks.size());
@@ -334,6 +424,28 @@ Configuration buildConfiguration(const toml::table& root) {
     config.cache = readCache(root);
     config.security = readSecurity(root);
     config.monitoring = readMonitoring(root);
+    if (const toml::node* policy = root.get("wallet_policy")) {
+        const toml::table* table = policy->as_table();
+        if (table == nullptr) {
+            throw ParseError(at(*policy, "wallet_policy must be a table"));
+        }
+        if (const toml::node* denylist = table->get("denylist")) {
+            const toml::array* addresses = denylist->as_array();
+            if (addresses == nullptr) {
+                throw ParseError(at(*denylist, "key 'denylist' must be an array of addresses"));
+            }
+            for (const toml::node& item : *addresses) {
+                const auto address = item.value<std::string>();
+                if (!address || !isValidAddress(*address)) {
+                    throw ParseError(at(item, "denylist entries must be 0x-prefixed 20-byte addresses"));
+                }
+                config.wallet_policy.denylist.push_back(*address);
+            }
+        }
+        if (table->get("minimum_nft_age_seconds") != nullptr) {
+            config.wallet_policy.minimum_nft_age_seconds = readUint64(*table, "minimum_nft_age_seconds");
+        }
+    }
     return config;
 }
 
@@ -414,6 +526,21 @@ std::vector<std::string> ConfigurationManager::validate(const Configuration& con
     if (config.payment_wallet_seed.empty()) {
         add("blockchain.payment_wallet_seed is required");
     }
+    if (!config.treasury_private_key.empty()) {
+        const auto& key = config.treasury_private_key;
+        const bool prefixed = key.size() == 66 && key[0] == '0' && (key[1] == 'x' || key[1] == 'X');
+        bool hex = prefixed;
+        bool nonzero = false;
+        for (std::size_t index = 2; hex && index < key.size(); ++index) {
+            const char character = key[index];
+            hex = (character >= '0' && character <= '9') || (character >= 'a' && character <= 'f') ||
+                  (character >= 'A' && character <= 'F');
+            nonzero = nonzero || character != '0';
+        }
+        if (!hex || !nonzero) {
+            add("blockchain.treasury_private_key must be a non-zero 32-byte hex key");
+        }
+    }
     if (config.networks.empty()) {
         add("blockchain.networks must not be empty");
     }
@@ -437,8 +564,37 @@ std::vector<std::string> ConfigurationManager::validate(const Configuration& con
         if (!isValidAddress(network.validation_registry)) {
             add(prefix + "validation_registry must be a 0x-prefixed 20-byte address");
         }
+        if (!isValidAddress(network.usdc_contract)) {
+            add(prefix + "usdc_contract must be a 0x-prefixed 20-byte address");
+        }
+        if (network.usdc_decimals < 1 || network.usdc_decimals > 18) {
+            add(prefix + "usdc_decimals must be in [1, 18]");
+        }
+        if (network.usdc_eip712_name.empty() || network.usdc_eip712_version.empty()) {
+            add(prefix + "usdc_eip712_name and usdc_eip712_version must be non-empty");
+        }
         if (network.gas_limit == 0) {
             add(prefix + "gas_limit must be > 0");
+        }
+        for (std::size_t coin_index = 0; coin_index < network.stablecoins.size(); ++coin_index) {
+            const StablecoinConfig& coin = network.stablecoins[coin_index];
+            const std::string coin_prefix = prefix + "stablecoins[" + std::to_string(coin_index) + "].";
+            if (coin.symbol.empty() || coin.symbol == "USDC" || coin.symbol == "usdc") {
+                add(coin_prefix + "symbol must be non-empty and distinct from USDC");
+            }
+            if (!isValidAddress(coin.contract) ||
+                gateway::blockchain::normalizeAddress(coin.contract) ==
+                    gateway::blockchain::normalizeAddress(network.usdc_contract)) {
+                add(coin_prefix + "contract must be a distinct 0x-prefixed 20-byte address");
+            }
+            if (coin.decimals < 1 || coin.decimals > 18) {
+                add(coin_prefix + "decimals must be in [1, 18]");
+            }
+        }
+    }
+    for (const std::string& address : config.wallet_policy.denylist) {
+        if (!isValidAddress(address)) {
+            add("wallet_policy.denylist entries must be 0x-prefixed 20-byte addresses");
         }
     }
 
@@ -449,6 +605,9 @@ std::vector<std::string> ConfigurationManager::validate(const Configuration& con
         if (endpoint.price_usdc < 0.0) {
             add(prefix + "price_usdc must be >= 0");
         }
+        if (endpoint.gas_budget_usdc < 0.0) {
+            add(prefix + "gas_budget_usdc must be >= 0");
+        }
         if (endpoint.trust_threshold < 0.0 || endpoint.trust_threshold > 1.0) {
             add(prefix + "trust_threshold must be in [0, 1]");
         }
@@ -457,6 +616,11 @@ std::vector<std::string> ConfigurationManager::validate(const Configuration& con
         }
         if (endpoint.backend_timeout.count() <= 0) {
             add(prefix + "backend_timeout must be >= 1");
+        }
+        for (const std::string& address : endpoint.allowlist) {
+            if (!isValidAddress(address)) {
+                add(prefix + "allowlist entries must be 0x-prefixed 20-byte addresses");
+            }
         }
     };
     for (std::size_t index = 0; index < config.endpoints.size(); ++index) {
@@ -493,6 +657,12 @@ std::string ConfigurationManager::serialize(const Configuration& config) {
             table.insert("path_pattern", endpoint.path_pattern);
         }
         table.insert("price_usdc", endpoint.price_usdc);
+        table.insert("gas_budget_usdc", endpoint.gas_budget_usdc);
+        toml::array allowlist;
+        for (const std::string& address : endpoint.allowlist) {
+            allowlist.push_back(address);
+        }
+        table.insert("allowlist", std::move(allowlist));
         table.insert("trust_threshold", endpoint.trust_threshold);
         table.insert("required_proofs", proofs_of(endpoint.required_proofs));
         table.insert("backend_url", endpoint.backend_url);
@@ -516,12 +686,26 @@ std::string ConfigurationManager::serialize(const Configuration& config) {
         row.insert("identity_registry", network.identity_registry);
         row.insert("reputation_registry", network.reputation_registry);
         row.insert("validation_registry", network.validation_registry);
+        row.insert("usdc_contract", network.usdc_contract);
+        row.insert("usdc_decimals", static_cast<std::int64_t>(network.usdc_decimals));
+        row.insert("usdc_eip712_name", network.usdc_eip712_name);
+        row.insert("usdc_eip712_version", network.usdc_eip712_version);
+        toml::array stablecoins;
+        for (const StablecoinConfig& coin : network.stablecoins) {
+            toml::table coin_row;
+            coin_row.insert("symbol", coin.symbol);
+            coin_row.insert("contract", coin.contract);
+            coin_row.insert("decimals", static_cast<std::int64_t>(coin.decimals));
+            stablecoins.push_back(std::move(coin_row));
+        }
+        row.insert("stablecoins", std::move(stablecoins));
         row.insert("gas_limit", static_cast<std::int64_t>(network.gas_limit));
         row.insert("enabled", network.enabled);
         networks.push_back(std::move(row));
     }
     toml::table blockchain;
     blockchain.insert("payment_wallet_seed", config.payment_wallet_seed);
+    blockchain.insert("treasury_private_key", config.treasury_private_key);
     blockchain.insert("networks", std::move(networks));
 
     toml::array endpoints;
@@ -532,6 +716,15 @@ std::string ConfigurationManager::serialize(const Configuration& config) {
     toml::table cache;
     cache.insert("max_size_mb", static_cast<std::int64_t>(config.cache.max_size_mb));
     cache.insert("default_ttl_seconds", static_cast<std::int64_t>(config.cache.default_ttl.count()));
+
+    toml::array denylist;
+    for (const std::string& address : config.wallet_policy.denylist) {
+        denylist.push_back(address);
+    }
+    toml::table wallet_policy;
+    wallet_policy.insert("denylist", std::move(denylist));
+    wallet_policy.insert("minimum_nft_age_seconds",
+                         static_cast<std::int64_t>(config.wallet_policy.minimum_nft_age_seconds));
 
     toml::table security;
     security.insert("bloom_filter_size_mb", static_cast<std::int64_t>(config.security.bloom_filter_size_mb));
@@ -549,6 +742,7 @@ std::string ConfigurationManager::serialize(const Configuration& config) {
     root.insert("endpoints", std::move(endpoints));
     root.insert("default_endpoint", endpoint_table(config.default_endpoint, false));
     root.insert("cache", std::move(cache));
+    root.insert("wallet_policy", std::move(wallet_policy));
     root.insert("security", std::move(security));
     root.insert("monitoring", std::move(monitoring));
 

@@ -1,6 +1,6 @@
-# AgentGateway Dependencies
+# SynapseGateway dependencies
 
-This document describes all third-party dependencies used in the AgentGateway project and how to set them up.
+This document describes all third-party dependencies used in SynapseGateway 0.2.0 and how to set them up.
 
 ## Dependency Management
 

@@ -1,6 +1,6 @@
-# AgentGateway Configuration
+# SynapseGateway configuration
 
-This directory contains configuration files for the AgentGateway middleware system.
+Version 0.2.0. This directory contains configuration files for the SynapseGateway reverse proxy.
 
 ## Configuration Files
 
@@ -18,8 +18,8 @@ For local development, use the dev configuration:
 # Copy the dev config
 cp config/gateway.dev.toml config/gateway.toml
 
-# Run AgentGateway
-./build/bin/agentgateway --config config/gateway.toml
+# Run SynapseGateway
+./SynapseGateway config/gateway.toml
 ```
 
 ### Production
@@ -43,7 +43,7 @@ For production deployment:
 
 3. Review and customize endpoint configurations
 
-4. Run AgentGateway with the production config
+4. Run SynapseGateway with the production config
 
 ## Configuration Sections
 
@@ -65,6 +65,9 @@ Blockchain network configuration and wallet settings:
   - `identity_registry` - ERC-721 identity registry contract address
   - `reputation_registry` - On-chain reputation registry contract address
   - `validation_registry` - Proof-of-work validation contract address
+  - `usdc_contract` - ERC-20 USDC contract. A payment counts only when this contract emits the Transfer
+  - `usdc_decimals` - Decimals of that contract, from 1 to 18 (6 on most networks, 18 on BNB)
+  - `stablecoins` - Optional extra tokens. Each entry has `symbol`, `contract`, and `decimals`. USDC stays the default for collection and refunds
   - `gas_limit` - Maximum gas limit for transactions
   - `enabled` - Whether network is active
 
@@ -79,6 +82,15 @@ Per-endpoint configuration for API monetization:
 - `backend_timeout` - Backend request timeout in seconds
 - `rate_limit_per_minute` - Maximum requests per wallet per minute
 - `new_agents_allowed` - Allow agents without reputation history
+- `allowlist` - Optional addresses. Empty accepts every wallet that passes the other checks
+- `gas_budget_usdc` - When this is strictly above `price_usdc`, the call debits prepaid credit
+
+### [wallet_policy]
+
+Reloaded with the file:
+
+- `denylist` - Wallets rejected with HTTP 403 before payment
+- `minimum_nft_age_seconds` - Minimum age of the identity NFT. Zero disables the check
 
 ### [default_endpoint]
 
@@ -118,7 +130,7 @@ Sensitive configuration values should be provided via environment variables:
 
 ## Hot Reload
 
-AgentGateway watches the configuration file for changes and automatically reloads within 10 seconds. Configuration updates apply immediately to all requests, including in-flight requests.
+SynapseGateway watches the configuration file for changes and automatically reloads within 10 seconds. Configuration updates apply immediately to all requests, including in-flight requests.
 
 To force a reload, send `SIGHUP` signal:
 ```bash

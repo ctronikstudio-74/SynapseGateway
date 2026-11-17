@@ -1,4 +1,6 @@
-# AgentGateway Build Instructions
+# SynapseGateway build instructions
+
+Version 0.2.0. The CMake target and the executable are both named `SynapseGateway`.
 
 ## Prerequisites
 
@@ -158,7 +160,7 @@ cmake --build build -j$(sysctl -n hw.ncpu)  # macOS
 ## Build Outputs
 
 - Binaries: `out/build/<preset-name>/` or `build/`
-- Executable: `gateway_node` (or `gateway_node.exe` on Windows)
+- Executable: `SynapseGateway` (or `SynapseGateway.exe` on Windows)
 - Compile commands: `compile_commands.json` (for IDE/LSP integration)
 
 ## IDE Integration
@@ -239,7 +241,7 @@ The build system automatically links required platform libraries:
 After successful build:
 1. Dependencies will be added in task 1.2 (Drogon, Boost, OpenSSL, etc.)
 2. Unit tests will be added in task 1.2
-3. Run the executable: `./out/build/<preset>/gateway_node`
+3. Run the executable: `./out/build/<preset>/SynapseGateway config/gateway.dev.toml`
 
 ## References
 

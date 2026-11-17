@@ -1,5 +1,5 @@
 [Unit]
-Description=AgentGateway x402 reverse proxy
+Description=SynapseGateway x402 reverse proxy
 After=network-online.target
 Wants=network-online.target
 
@@ -8,7 +8,7 @@ Type=simple
 User=agentgateway
 Group=agentgateway
 WorkingDirectory=/var/lib/agentgateway
-ExecStart=/usr/local/bin/gateway_node /etc/agentgateway/gateway.toml
+ExecStart=/usr/local/bin/SynapseGateway /etc/agentgateway/gateway.toml
 Restart=on-failure
 RestartSec=2
 TimeoutStopSec=35

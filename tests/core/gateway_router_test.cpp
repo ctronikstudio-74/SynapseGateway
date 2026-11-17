@@ -1,18 +1,43 @@
+#include "gateway/blockchain/hex.h"
+#include "gateway/blockchain/request_signature.h"
 #include "gateway/core/GatewayRouter.h"
 
 #include "../support/fake_chain.h"
 
 #include <gtest/gtest.h>
 
+#include <nlohmann/json.hpp>
+
 #include <chrono>
 #include <filesystem>
+#include <iomanip>
 #include <memory>
+#include <sstream>
 #include <thread>
 
 namespace {
 
-const std::string kWallet = "0x2222222222222222222222222222222222222222";
-const std::string kSignature(64, 'a');
+struct KnownAgent {
+    std::string key;
+    std::string address;
+};
+
+KnownAgent makeAgent(unsigned index) {
+    std::ostringstream key;
+    key << "0x" << std::hex << std::setfill('0') << std::setw(64) << index;
+    KnownAgent agent;
+    agent.key = key.str();
+    agent.address = gateway::blockchain::addressFromPrivateKey(agent.key).value_or("");
+    return agent;
+}
+
+const KnownAgent& knownAgent(unsigned index) {
+    static const KnownAgent agents[] = {makeAgent(1), makeAgent(2), makeAgent(3), makeAgent(4)};
+    return agents[index - 1];
+}
+
+const std::string& kWallet = knownAgent(1).address;
+const std::string kTreasury = "0x1111111111111111111111111111111111111111";
 
 class ScriptedBackend final : public gateway::core::BackendClient {
 public:
@@ -114,15 +139,39 @@ void prime(gateway::test::FakeChain& chain) {
     chain.transaction.transaction = tx;
 }
 
+std::string keyFor(const std::string& wallet) {
+    for (unsigned index = 1; index <= 4; ++index) {
+        if (gateway::blockchain::normalizeAddress(knownAgent(index).address) ==
+            gateway::blockchain::normalizeAddress(wallet)) {
+            return knownAgent(index).key;
+        }
+    }
+    return knownAgent(1).key;
+}
+
 gateway::core::ForwardRequest call(const std::string& method, const std::string& path, const std::string& wallet,
-                                   const std::string& tx = {}) {
+                                   const std::string& tx = {}, const std::string& quote = {},
+                                   std::uint64_t expiry = 0) {
+    gateway::blockchain::AgentRequest signed_request;
+    signed_request.method = method;
+    signed_request.path = path;
+    signed_request.wallet = wallet;
+    signed_request.quote_reference = quote;
+    signed_request.expiry_unix = expiry;
+    signed_request.chain_id = gateway::blockchain::chainIdOf(gateway::core::Network::BASE);
+    signed_request.verifying_contract = kTreasury;
+    const auto signature = gateway::blockchain::signAgentRequest(keyFor(wallet), signed_request);
+
     gateway::core::ForwardRequest request;
     request.method = method;
     request.target = path;
     request.headers.push_back({"Accept", "application/json"});
-    request.headers.push_back({"X-Agent-Signature", kSignature});
+    request.headers.push_back({"X-Agent-Signature", signature.value_or("")});
     request.headers.push_back({"X-Agent-Wallet", wallet});
     request.headers.push_back({"X-Payment-Tx", tx});
+    if (!quote.empty()) {
+        request.headers.push_back({"X-Payment-Reference", quote});
+    }
     request.headers.push_back({"X-Request-Id", "trace\r\nX-Evil: 1"});
     return request;
 }
@@ -180,19 +229,25 @@ TEST(GatewayRouterTest, RejectsMissingSignatureWalletAndEnforcesThePipeline) {
     const auto unpaid = router.handle(call("GET", "/api/paid", kWallet));
     EXPECT_EQ(unpaid.status, 402);
     EXPECT_NE(unpaid.body.find("0.001"), std::string::npos);
+    const auto quote = nlohmann::json::parse(unpaid.body);
+    const std::string reference = quote.at("transaction_reference").get<std::string>();
+    EXPECT_GT(quote.at("expires_at_unix").get<std::uint64_t>(), 0u);
 
-    const auto paid = router.handle(call("POST", "/api/paid", kWallet, "0xpaid"));
+    const auto expiry = quote.at("expires_at_unix").get<std::uint64_t>();
+    const auto paid = router.handle(call("POST", "/api/paid", kWallet, "0xpaid", reference, expiry));
     EXPECT_EQ(paid.status, 200);
 
     auto clock = std::make_shared<std::chrono::steady_clock::time_point>(std::chrono::steady_clock::now());
+    const auto quoted_at = *clock;
     router.setTimeSource([clock] { return *clock; });
     *clock += std::chrono::hours{25};
-    const auto replay = router.handle(call("POST", "/api/paid", kWallet, "0xpaid"));
+    const auto replay = router.handle(call("POST", "/api/paid", kWallet, "0xpaid", reference, expiry));
     EXPECT_EQ(replay.status, 409);
+    *clock = quoted_at;
 
     chain->identity.status = gateway::blockchain::LookupStatus::NotFound;
     chain->identity.nft.reset();
-    const auto no_identity = router.handle(call("GET", "/api/free", "0x4444444444444444444444444444444444444444"));
+    const auto no_identity = router.handle(call("GET", "/api/free", knownAgent(2).address));
     EXPECT_EQ(no_identity.status, 403);
     chain->identity.status = gateway::blockchain::LookupStatus::Found;
     gateway::blockchain::IdentityNFT nft;
@@ -204,10 +259,10 @@ TEST(GatewayRouterTest, RejectsMissingSignatureWalletAndEnforcesThePipeline) {
 
     chain->reputation.reputation->success_rate = 0.0;
     chain->reputation.reputation->feedback_score = 0.0;
-    const auto low_trust = router.handle(call("GET", "/api/strict", "0x5555555555555555555555555555555555555555"));
+    const auto low_trust = router.handle(call("GET", "/api/strict", knownAgent(3).address));
     EXPECT_EQ(low_trust.status, 403);
 
-    const std::string limited_wallet = "0x6666666666666666666666666666666666666666";
+    const std::string limited_wallet = knownAgent(4).address;
     const auto first_limited = router.handle(call("GET", "/api/limited", limited_wallet));
     const auto second_limited = router.handle(call("GET", "/api/limited", limited_wallet));
     EXPECT_EQ(first_limited.status, 200);
@@ -219,19 +274,19 @@ TEST(GatewayRouterTest, RejectsMissingSignatureWalletAndEnforcesThePipeline) {
     EXPECT_TRUE(retry);
 
     backend->next.kind = gateway::core::ForwardResult::Kind::ConnectionFailed;
-    const auto bad_gateway = router.handle(call("POST", "/api/paid", kWallet, "0xdown"));
+    const auto bad_gateway = router.handle(call("POST", "/api/paid", kWallet, "0xdown", reference, expiry));
     EXPECT_EQ(bad_gateway.status, 502);
     EXPECT_TRUE(payment->findRefund("0xdown").has_value());
 
     backend->next.kind = gateway::core::ForwardResult::Kind::Timeout;
-    const auto timeout = router.handle(call("POST", "/api/paid", kWallet, "0xtimeout"));
+    const auto timeout = router.handle(call("POST", "/api/paid", kWallet, "0xtimeout", reference, expiry));
     EXPECT_EQ(timeout.status, 504);
     EXPECT_TRUE(payment->findRefund("0xtimeout").has_value());
 
     backend->next.kind = gateway::core::ForwardResult::Kind::Ok;
     backend->next.status = 503;
     backend->next.body = "down";
-    const auto upstream = router.handle(call("POST", "/api/paid", kWallet, "0xupstream"));
+    const auto upstream = router.handle(call("POST", "/api/paid", kWallet, "0xupstream", reference, expiry));
     EXPECT_EQ(upstream.status, 503);
     EXPECT_TRUE(payment->findRefund("0xupstream").has_value());
 

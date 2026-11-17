@@ -1,7 +1,11 @@
-# AgentGateway
+# SynapseGateway
 
+<<<<<<< HEAD
 The most fast agentic gateway on the market !!!
 AgentGateway is a high-performance C++20 middleware solution that bridges AI agents with traditional APIs through blockchain-based payment and identity verification.
+=======
+Version 0.2.0. SynapseGateway is a C++20 reverse proxy that lets an AI agent pay for an API with a stablecoin transfer, prove an ERC-8004 identity, and reach the existing backend. The sources are released under GPL-3.0-only.
+>>>>>>> d147439 (2nd alfa release , review of initials implementations of SynapseGateway, functional extension)
 
 
 ## Features
@@ -82,23 +86,20 @@ ctest --preset windows-msvc-release  # or appropriate preset for your platform
 ## Project Structure
 
 ```
-AgentGateway/
+SynapseGateway/
 ├── cmake/              # Custom CMake find modules
-├── include/gateway/    # Public headers
-│   ├── core/          # Core components (router, payment, identity)
-│   ├── blockchain/    # Blockchain integration
-│   ├── monitoring/    # Metrics and logging
-│   └── utils/         # Utility classes
-├── src/               # Implementation files
-├── tests/             # Unit and integration tests
-├── config/            # Example configuration files
-└── doc/               # Documentation
+├── include/gateway/    # Public headers, including SynapseGateway.h
+├── src/                # Implementation. src/SynapseGateway.cpp is the process entry
+├── tests/              # Unit and integration tests
+├── config/             # Example, development, and production TOML
+├── deploy/             # systemd unit and Prometheus example
+└── docs/               # API, operations, and deployment
 
 ```
 
 ## Dependencies
 
-AgentGateway uses vcpkg for dependency management. Key dependencies include:
+SynapseGateway uses vcpkg for dependency management. Key dependencies include:
 
 - **Drogon** (>= 1.9.0) - HTTP framework
 - **Boost** (>= 1.75.0) - Networking and utilities
@@ -140,10 +141,19 @@ backend_url = "http://localhost:3000"
 ## Run
 
 ```text
-gateway_node config/gateway.dev.toml
+SynapseGateway config/gateway.dev.toml
 ```
 
-The process listens on the configured HTTP port and writes payment state to `data/payment-state.json`. SIGTERM drains in-flight requests and exits 0.
+On Windows the file is `SynapseGateway.exe`, under `build/windows-msvc/Debug` or `Release`. The process listens on the configured HTTP port and writes payment state to `data/payment-state.json`. SIGTERM drains in-flight requests and exits 0.
+
+The EIP-712 domain signed by agents remains `AgentGateway` version `1`. That name is the signature domain, not the product name.
+
+## Version 0.2.0
+
+- USDC stays the default. A network may also accept USDT or EURC, each with its own decimals. EIP-3009 collection and on-chain refunds stay on USDC.
+- Wallet policy: a denylist, a minimum identity-NFT age, and a per-endpoint allowlist. All three reload with the TOML file.
+- An agent can pay with an EIP-3009 authorization, or with prepaid credit when `gas_budget_usdc` is above the call price.
+- The executable target is `SynapseGateway`. `src/SynapseGateway.cpp` starts the process.
 
 ## Development Status
 

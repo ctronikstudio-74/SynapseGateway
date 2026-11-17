@@ -104,6 +104,25 @@ std::string AbiDecoder::encodeDynamicBytesCall(std::string_view signature,
     return "0x" + toHex(body);
 }
 
+std::string AbiDecoder::encodeBytes32AndBytesCall(std::string_view signature,
+                                                     std::string_view word_hex,
+                                                     std::string_view payload_hex) {
+    const auto payload = fromHex(payload_hex);
+    const auto selector = functionSelector(signature);
+    std::vector<std::uint8_t> body;
+    body.insert(body.end(), selector.begin(), selector.end());
+    const auto word = encodeBytes32(word_hex);
+    body.insert(body.end(), word.begin(), word.end());
+    const auto offset = encodeUint256(64);
+    body.insert(body.end(), offset.begin(), offset.end());
+    const auto length = encodeUint256(static_cast<std::uint64_t>(payload.size()));
+    body.insert(body.end(), length.begin(), length.end());
+    const std::size_t padded = ((payload.size() + 31) / 32) * 32;
+    body.insert(body.end(), payload.begin(), payload.end());
+    body.resize(body.size() + (padded - payload.size()), 0);
+    return "0x" + toHex(body);
+}
+
 std::string AbiDecoder::encodeIdentityReturn(std::string_view identity_type,
                                              std::uint64_t registration_timestamp) {
     std::vector<std::uint8_t> body;

@@ -44,6 +44,8 @@ struct PaymentResponse {
     std::optional<double> price_usdc;
     std::optional<std::string> preferred_network;
     std::optional<std::string> transaction_reference;
+    std::optional<std::uint64_t> expires_at_unix;
+    std::optional<std::string> settled_tx_hash;
 };
 
 [[nodiscard]] bool amountCoversQuote(double paid_usdc, double quoted_usdc);
@@ -52,12 +54,15 @@ struct PaymentResponse {
 class PaymentProcessor {
 public:
     static constexpr std::chrono::hours kVerifiedPaymentTtl{24};
+    static constexpr std::chrono::minutes kQuoteTtl{15};
 
     PaymentProcessor(std::shared_ptr<gateway::blockchain::BlockchainQuery> blockchain,
                      std::shared_ptr<Configuration> config,
                      std::filesystem::path refund_store_path);
 
-    [[nodiscard]] PaymentResponse requestPayment(const PaymentRequest& request);
+    [[nodiscard]] PaymentResponse requestPayment(
+        const PaymentRequest& request,
+        std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now());
     [[nodiscard]] PaymentResponse verifyPayment(
         const PaymentRequest& request,
         double endpoint_price,
@@ -76,11 +81,31 @@ public:
     void updateConfiguration(std::shared_ptr<Configuration> config);
     void persistState() const;
     [[nodiscard]] std::vector<PendingVerification> pendingVerifications() const;
+    [[nodiscard]] std::optional<IssuedQuote> findQuote(const std::string& reference) const;
+    [[nodiscard]] PaymentResponse settleAuthorization(
+        const PaymentRequest& request,
+        const gateway::blockchain::TransferAuthorization& authorization,
+        double endpoint_price,
+        std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now());
+    [[nodiscard]] PaymentResponse creditDeposit(const std::string& wallet_address, const std::string& tx_hash);
+    [[nodiscard]] bool tryDebitPrepaid(const std::string& wallet_address, double amount_usdc);
+    void creditPrepaid(const std::string& wallet_address, double amount_usdc);
+    [[nodiscard]] double prepaidBalance(const std::string& wallet_address) const;
 
 private:
+    struct OpenQuote {
+        IssuedQuote quote;
+        std::chrono::steady_clock::time_point expires_at{};
+    };
+
     struct CachedProof {
         std::chrono::steady_clock::time_point expires_at{};
         std::uint64_t expires_at_unix = 0;
+        std::string endpoint_path;
+        std::string wallet_address;
+        std::string network;
+        std::string reference;
+        double price_usdc = 0.0;
     };
 
     void loadState();
@@ -97,6 +122,9 @@ private:
     Cache<std::string, std::string> verified_cache_;
     std::unique_ptr<gateway::utils::BloomFilter> replay_filter_;
     std::unordered_map<std::string, CachedProof> verified_until_;
+    std::unordered_map<std::string, OpenQuote> quotes_;
+    std::unordered_map<std::string, double> credits_;
+    std::unordered_map<std::string, std::string> authorization_txs_;
     std::unordered_set<std::string> seen_transactions_;
     std::vector<gateway::models::RefundableTransaction> refunds_;
     std::vector<PendingVerification> pending_;

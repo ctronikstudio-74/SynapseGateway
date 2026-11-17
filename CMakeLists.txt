@@ -1,8 +1,8 @@
-﻿# CMakeLists.txt - AgentGateway C++20 Middleware Build System
+﻿# CMakeLists.txt - SynapseGateway C++20 Middleware Build System
 # Supports cross-platform compilation: Windows (MSVC), Linux (GCC/Clang), macOS (Clang)
 
 cmake_minimum_required(VERSION 3.20)
-project(AgentGateway VERSION 0.1.0 LANGUAGES CXX)
+project(SynapseGateway VERSION 0.2.0 LANGUAGES CXX)
 
 # ============================================================================
 # C++20 Standard Configuration
@@ -213,6 +213,9 @@ add_library(gateway_core STATIC
     src/utils/rate_limiter.cpp
     src/blockchain/hex.cpp
     src/blockchain/keccak.cpp
+    src/blockchain/request_signature.cpp
+    src/blockchain/rlp.cpp
+    src/blockchain/settlement.cpp
     src/blockchain/create2.cpp
     src/blockchain/abi_decoder.cpp
     src/blockchain/network_selection.cpp
@@ -249,10 +252,10 @@ endif()
 # ============================================================================
 # Main Executable Target
 # ============================================================================
-add_executable(gateway_node src/main.cpp)
+add_executable(SynapseGateway src/SynapseGateway.cpp)
 
-target_compile_features(gateway_node PUBLIC cxx_std_20)
-target_link_libraries(gateway_node PRIVATE
+target_compile_features(SynapseGateway PUBLIC cxx_std_20)
+target_link_libraries(SynapseGateway PRIVATE
     gateway_core
 
     # HTTP framework
@@ -284,7 +287,7 @@ target_link_libraries(gateway_node PRIVATE
 # ============================================================================
 # Installation Rules
 # ============================================================================
-install(TARGETS gateway_node
+install(TARGETS SynapseGateway
     RUNTIME DESTINATION bin
     LIBRARY DESTINATION lib
     ARCHIVE DESTINATION lib
@@ -321,9 +324,12 @@ if(BUILD_TESTING)
     gateway_add_test(configuration_parser_test tests/core/configuration_parser_test.cpp)
     gateway_add_test(utility_properties_test tests/properties/utility_properties_test.cpp)
     gateway_add_test(configuration_roundtrip_test tests/core/configuration_roundtrip_test.cpp)
+    gateway_add_test(wallet_policy_test tests/core/wallet_policy_test.cpp)
     gateway_add_test(create2_test tests/blockchain/create2_test.cpp)
     gateway_add_test(abi_decoder_test tests/blockchain/abi_decoder_test.cpp)
     gateway_add_test(connector_test tests/blockchain/connector_test.cpp)
+    gateway_add_test(request_signature_test tests/blockchain/request_signature_test.cpp)
+    gateway_add_test(settlement_test tests/blockchain/settlement_test.cpp)
     gateway_add_test(payment_processor_test tests/core/payment_processor_test.cpp)
     gateway_add_test(identity_reputation_test tests/core/identity_reputation_test.cpp)
     gateway_add_test(monitoring_test tests/monitoring/monitoring_test.cpp)
@@ -343,7 +349,7 @@ endif()
 # Build Summary
 # ============================================================================
 message(STATUS "========================================")
-message(STATUS "AgentGateway Build Configuration")
+message(STATUS "SynapseGateway Build Configuration")
 message(STATUS "========================================")
 message(STATUS "  Version:      ${PROJECT_VERSION}")
 message(STATUS "  Build Type:   ${CMAKE_BUILD_TYPE}")
