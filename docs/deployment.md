@@ -68,7 +68,7 @@ The unit restarts on failure. SIGTERM stops new connections, waits up to 30 seco
 docker compose up --build
 ```
 
-The image is a multi-stage Ubuntu 22.04 build. The runtime listens on 8080 and 9090. Compose also starts Prometheus and Grafana. Grafana is on port 3000 with the Prometheus datasource already provisioned. Scrape `agentgateway:9090`.
+The image is a multi-stage Ubuntu 22.04 build. The runtime process is `SynapseGateway` and listens on 8080 and 9090. Compose also starts Prometheus and Grafana. Grafana is on port 3000 with the Prometheus datasource already provisioned. Prometheus scrapes `synapsegateway:9090`. The first image build compiles the C++ dependencies and takes a long time.
 
 ## Monitoring
 

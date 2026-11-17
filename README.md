@@ -82,6 +82,7 @@ ctest --preset windows-msvc-release  # or appropriate preset for your platform
 - [Deployment](docs/deployment.md) - Build, Docker, systemd, and monitoring
 - [API](docs/api.md) - x402 headers, status codes, and refunds
 - [Funzionamento](docs/funzionamento.md) - avvio, percorso di una richiesta, rimborsi e arresto
+- [Features](docs/features.md) - complete capability catalog and the remaining design gaps
 
 ## Project Structure
 

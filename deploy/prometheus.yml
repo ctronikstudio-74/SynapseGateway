@@ -2,6 +2,6 @@ global:
   scrape_interval: 15s
 
 scrape_configs:
-  - job_name: agentgateway
+  - job_name: synapsegateway
     static_configs:
-      - targets: ["agentgateway:9090"]
+      - targets: ["synapsegateway:9090"]

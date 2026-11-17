@@ -15,7 +15,7 @@ COPY . .
 RUN cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_TOOLCHAIN_FILE=/opt/vcpkg/scripts/buildsystems/vcpkg.cmake \
         -DVCPKG_TARGET_TRIPLET=x64-linux \
-    && cmake --build build --target gateway_node
+    && cmake --build build --target SynapseGateway
 
 FROM ubuntu:22.04
 
@@ -24,8 +24,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
     && rm -rf /var/lib/apt/lists/* \
     && useradd --system --create-home --home-dir /var/lib/agentgateway agentgateway
 
-COPY --from=build /src/build/gateway_node /usr/local/bin/gateway_node
-COPY --from=build /opt/vcpkg/installed/x64-linux/lib/ /usr/local/lib/
+COPY --from=build /src/build/SynapseGateway /usr/local/bin/SynapseGateway
+COPY --from=build /src/build/vcpkg_installed/x64-linux/lib/ /usr/local/lib/
 COPY config/gateway.example.toml /etc/agentgateway/gateway.toml
 RUN ldconfig \
     && mkdir -p /var/lib/agentgateway/data \
@@ -38,5 +38,5 @@ EXPOSE 8080 9090
 HEALTHCHECK --interval=30s --timeout=3s --start-period=20s --retries=3 \
     CMD curl --fail --silent http://127.0.0.1:8080/health || exit 1
 
-ENTRYPOINT ["/usr/local/bin/gateway_node"]
+ENTRYPOINT ["/usr/local/bin/SynapseGateway"]
 CMD ["/etc/agentgateway/gateway.toml"]

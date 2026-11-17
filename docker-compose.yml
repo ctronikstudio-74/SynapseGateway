@@ -1,5 +1,5 @@
 services:
-  agentgateway:
+  synapsegateway:
     build: .
     ports:
       - "8080:8080"
@@ -21,7 +21,7 @@ services:
     ports:
       - "9091:9090"
     depends_on:
-      - agentgateway
+      - synapsegateway
 
   grafana:
     image: grafana/grafana:11.2.0

@@ -1,6 +1,6 @@
 # Come funziona SynapseGateway
 
-Versione 0.2.0. SynapseGateway è un reverse proxy C++20 per API usate da agenti. Intercetta la richiesta HTTP, applica il protocollo x402 e i controlli ERC-8004, poi inoltra la chiamata al backend configurato. Il binario è `SynapseGateway`. Il dominio EIP-712 firmato dagli agenti resta `AgentGateway` versione `1`.
+Versione 0.2.0. Il catalogo completo, in inglese, è [docs/features.md](features.md). SynapseGateway è un reverse proxy C++20 per API usate da agenti. Intercetta la richiesta HTTP, applica il protocollo x402 e i controlli ERC-8004, poi inoltra la chiamata al backend configurato. Il binario è `SynapseGateway`. Il dominio EIP-712 firmato dagli agenti resta `AgentGateway` versione `1`.
 
 ## Avvio
 
