@@ -31,27 +31,31 @@ std::string unixNano(std::chrono::system_clock::time_point point) {
 
 }  // namespace
 
+nlohmann::json stringAttribute(const char* key, const std::string& value) {
+    return nlohmann::json{{"key", key}, {"value", {{"stringValue", value}}}};
+}
+
 std::string otlpTraceJson(const SpanRecord& record) {
     const auto end = std::chrono::system_clock::now();
     const auto start = end - record.duration;
-    nlohmann::json span = {{"traceId", randomHex(16)},
-                           {"spanId", randomHex(8)},
-                           {"name", "gateway.request"},
-                           {"kind", 2},
-                           {"startTimeUnixNano", unixNano(start)},
-                           {"endTimeUnixNano", unixNano(end)},
-                           {"attributes",
-                            nlohmann::json::array({{{"key", "http.request.method"}, {"value", {{"stringValue", record.method}}}},
-                                                   {{"key", "url.path"}, {"value", {{"stringValue", record.path}}}},
-                                                   {{"key", "http.response.status_code"},
-                                                    {"value", {{"intValue", std::to_string(record.status)}}}}})},
-                           {"status", {{"code", record.status >= 500 ? 2 : 1}}}};
-    nlohmann::json body = {{"resourceSpans",
-                            nlohmann::json::array({{{"resource",
-                                                     {{"attributes",
-                                                       nlohmann::json::array({{{"key", "service.name"},
-                                                                               {"value", {{"stringValue", "SynapseGateway"}}}}})}}},
-                                                    {"scopeSpans", nlohmann::json::array({{{"spans", nlohmann::json::array({span})}}})}})}};
+    nlohmann::json span;
+    span["traceId"] = randomHex(16);
+    span["spanId"] = randomHex(8);
+    span["name"] = "gateway.request";
+    span["kind"] = 2;
+    span["startTimeUnixNano"] = unixNano(start);
+    span["endTimeUnixNano"] = unixNano(end);
+    span["attributes"] = nlohmann::json::array({stringAttribute("http.request.method", record.method),
+                                                stringAttribute("url.path", record.path),
+                                                nlohmann::json{{"key", "http.response.status_code"},
+                                                               {"value", {{"intValue", std::to_string(record.status)}}}}});
+    span["status"] = {{"code", record.status >= 500 ? 2 : 1}};
+    nlohmann::json body;
+    body["resourceSpans"] = nlohmann::json::array();
+    nlohmann::json resource_span;
+    resource_span["resource"]["attributes"] = nlohmann::json::array({stringAttribute("service.name", "SynapseGateway")});
+    resource_span["scopeSpans"] = nlohmann::json::array({nlohmann::json{{"spans", nlohmann::json::array({span})}}});
+    body["resourceSpans"].push_back(std::move(resource_span));
     return body.dump();
 }
 
