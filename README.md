@@ -1,12 +1,16 @@
 # SynapseGateway
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 The most fast agentic gateway on the market !!!
 AgentGateway is a high-performance C++20 middleware solution that bridges AI agents with traditional APIs through blockchain-based payment and identity verification.
 =======
 Version 0.2.0. SynapseGateway is a C++20 reverse proxy that lets an AI agent pay for an API with a stablecoin transfer, prove an ERC-8004 identity, and reach the existing backend. The sources are released under GPL-3.0-only.
 >>>>>>> d147439 (2nd alfa release , review of initials implementations of SynapseGateway, functional extension)
 
+=======
+Version 0.3.0. SynapseGateway is a C++20 reverse proxy that lets an AI agent pay for an API with a stablecoin transfer, prove an ERC-8004 identity, and reach the existing backend. The sources are released under GPL-3.0-only.
+>>>>>>> e455eb0 (no message)
 
 ## Features
 
@@ -148,6 +152,15 @@ SynapseGateway config/gateway.dev.toml
 On Windows the file is `SynapseGateway.exe`, under `build/windows-msvc/Debug` or `Release`. The process listens on the configured HTTP port and writes payment state to `data/payment-state.json`. SIGTERM drains in-flight requests and exits 0.
 
 The EIP-712 domain signed by agents remains `AgentGateway` version `1`. That name is the signature domain, not the product name.
+
+## Version 0.3.0
+
+- `GET /v1/auth` is the payment decision for Envoy ext_authz, Traefik ForwardAuth, and nginx auth_request. It does not call the backend.
+- `GET /mcp` and `POST /mcp` list the live routes for agent builders.
+- `SynapseGateway check config.toml` validates the file and prints the CREATE2 collection address without opening a port.
+- Startup logs that same address.
+- `GatewayFilter` is the stable extension point, in three phases.
+- An OTLP HTTP JSON span is exported only when `opentelemetry_enabled` is true and `otlp_endpoint` is set.
 
 ## Version 0.2.0
 

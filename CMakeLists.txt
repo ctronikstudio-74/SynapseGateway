@@ -2,7 +2,7 @@
 # Supports cross-platform compilation: Windows (MSVC), Linux (GCC/Clang), macOS (Clang)
 
 cmake_minimum_required(VERSION 3.20)
-project(SynapseGateway VERSION 0.2.0 LANGUAGES CXX)
+project(SynapseGateway VERSION 0.3.0 LANGUAGES CXX)
 
 # ============================================================================
 # C++20 Standard Configuration
@@ -223,6 +223,7 @@ add_library(gateway_core STATIC
     src/blockchain/BlockchainConnector.cpp
     src/blockchain/network_monitor.cpp
     src/monitoring/MetricsCollector.cpp
+    src/monitoring/otlp_span.cpp
     src/core/payment_state.cpp
     src/core/header_policy.cpp
     src/core/backend_pool.cpp
@@ -325,6 +326,7 @@ if(BUILD_TESTING)
     gateway_add_test(utility_properties_test tests/properties/utility_properties_test.cpp)
     gateway_add_test(configuration_roundtrip_test tests/core/configuration_roundtrip_test.cpp)
     gateway_add_test(wallet_policy_test tests/core/wallet_policy_test.cpp)
+    gateway_add_test(otlp_span_test tests/monitoring/otlp_span_test.cpp)
     gateway_add_test(create2_test tests/blockchain/create2_test.cpp)
     gateway_add_test(abi_decoder_test tests/blockchain/abi_decoder_test.cpp)
     gateway_add_test(connector_test tests/blockchain/connector_test.cpp)

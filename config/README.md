@@ -1,6 +1,6 @@
 # SynapseGateway configuration
 
-Version 0.2.0. This directory contains configuration files for the SynapseGateway reverse proxy.
+Version 0.3.0. This directory contains configuration files for the SynapseGateway reverse proxy. `SynapseGateway check config/gateway.toml` validates a file without listening. `otlp_endpoint` stays empty unless tracing is turned on.
 
 ## Configuration Files
 

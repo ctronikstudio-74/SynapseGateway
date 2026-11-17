@@ -144,3 +144,13 @@ log_level = "info"
     EXPECT_NE(loaded.error().find("solana"), std::string::npos);
     std::filesystem::remove(path);
 }
+
+TEST(ConfigurationParserTest, CheckReportsTheCollectionAddress) {
+    const std::filesystem::path example =
+        std::filesystem::path(GATEWAY_SOURCE_DIR) / "config" / "gateway.example.toml";
+    bool valid = false;
+    const std::string report = ConfigurationManager::checkFile(example, valid);
+    EXPECT_TRUE(valid);
+    EXPECT_NE(report.find("configuration is valid"), std::string::npos);
+    EXPECT_NE(report.find("payment_wallet=0x"), std::string::npos);
+}

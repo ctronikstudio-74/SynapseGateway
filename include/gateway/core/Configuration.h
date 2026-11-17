@@ -155,7 +155,8 @@ struct SecurityConfig {
  */
 struct MonitoringConfig {
     bool prometheus_enabled;            ///< Enable Prometheus metrics exposition
-    bool opentelemetry_enabled;         ///< Enable OpenTelemetry distributed tracing
+    bool opentelemetry_enabled = false; ///< Export one OTLP HTTP span per request when an endpoint is set
+    std::string otlp_endpoint;          ///< OTLP HTTP JSON endpoint. Empty keeps tracing off
     std::string log_level;              ///< Logging level: "trace", "debug", "info", "warn", "error"
 
     /**

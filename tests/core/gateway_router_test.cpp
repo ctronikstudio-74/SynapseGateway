@@ -1,5 +1,6 @@
 #include "gateway/blockchain/hex.h"
 #include "gateway/blockchain/request_signature.h"
+#include "gateway/core/filter_chain.h"
 #include "gateway/core/GatewayRouter.h"
 
 #include "../support/fake_chain.h"
@@ -317,5 +318,63 @@ TEST(GatewayRouterTest, RejectsMissingSignatureWalletAndEnforcesThePipeline) {
     gateway::core::PaymentProcessor restored(chain, config, state);
     const auto pending = restored.pendingVerifications();
     EXPECT_FALSE(pending.empty());
+    std::filesystem::remove(state);
+}
+
+namespace {
+
+class DenyBeforePayment final : public gateway::core::GatewayFilter {
+public:
+    std::string_view name() const override { return "deny-before-payment"; }
+
+    gateway::core::FilterResult apply(gateway::core::FilterContext& context) override {
+        if (context.phase == gateway::core::FilterPhase::BeforePayment) {
+            return gateway::core::FilterResult{false, 403, R"({"error":"filter denied"})"};
+        }
+        return {};
+    }
+};
+
+}  // namespace
+
+TEST(GatewayRouterTest, EdgeAuthMcpAndFiltersStayOnTheDecisionPath) {
+    gateway::monitoring::Logger::initialize("off");
+    auto chain = std::make_shared<gateway::test::FakeChain>();
+    prime(*chain);
+    auto config = makeConfig();
+    const auto state = std::filesystem::temp_directory_path() / "agentgw-edge-state.json";
+    std::filesystem::remove(state);
+    auto payment = std::make_shared<gateway::core::PaymentProcessor>(chain, config, state);
+    auto identity = std::make_shared<gateway::core::IdentityVerifier>(chain);
+    auto reputation = std::make_shared<gateway::core::ReputationChecker>(chain, config);
+    auto backend = std::make_shared<ScriptedBackend>();
+    gateway::core::GatewayRouter router(config, payment, identity, reputation, chain, backend);
+
+    const auto catalog = router.handle(gateway::core::ForwardRequest{"GET", "/mcp", {}, {}});
+    EXPECT_EQ(catalog.status, 200);
+    EXPECT_NE(catalog.body.find("/api/free"), std::string::npos);
+    EXPECT_NE(catalog.body.find("payment_wallet"), std::string::npos);
+
+    auto original = call("GET", "/api/free", kWallet);
+    gateway::core::ForwardRequest auth;
+    auth.method = "GET";
+    auth.target = "/v1/auth";
+    auth.headers = original.headers;
+    auth.headers.push_back({"X-Forwarded-Method", "GET"});
+    auth.headers.push_back({"X-Forwarded-Uri", "/api/free"});
+    const auto allowed = router.handle(auth);
+    EXPECT_EQ(allowed.status, 200);
+    EXPECT_NE(allowed.body.find("allowed"), std::string::npos);
+    EXPECT_EQ(backend->calls, 0);
+    bool identity_header = false;
+    for (const auto& header : allowed.headers) {
+        identity_header = identity_header || header.name == "X-Agent-Wallet";
+    }
+    EXPECT_TRUE(identity_header);
+
+    router.addFilter(std::make_shared<DenyBeforePayment>());
+    const auto denied = router.handle(call("GET", "/api/free", kWallet));
+    EXPECT_EQ(denied.status, 403);
+    EXPECT_EQ(backend->calls, 0);
     std::filesystem::remove(state);
 }

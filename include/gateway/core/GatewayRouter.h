@@ -6,6 +6,8 @@
 #include "gateway/core/ReputationChecker.h"
 #include "gateway/core/backend_client.h"
 #include "gateway/monitoring/MetricsCollector.h"
+#include "gateway/core/filter_chain.h"
+#include "gateway/monitoring/otlp_span.h"
 #include "gateway/utils/rate_limiter.h"
 
 #include <atomic>
@@ -38,6 +40,8 @@ public:
     [[nodiscard]] GatewayResponse handle(const ForwardRequest& request);
 
     void applyConfiguration(std::shared_ptr<Configuration> config);
+    void addFilter(std::shared_ptr<GatewayFilter> filter);
+    void setSpanExporter(std::shared_ptr<gateway::monitoring::SpanExporter> exporter);
     void shutdown(std::chrono::seconds drain_timeout);
     void setTimeSource(std::function<std::chrono::steady_clock::time_point()> clock);
 
@@ -56,6 +60,8 @@ private:
     std::shared_ptr<gateway::blockchain::BlockchainQuery> blockchain_;
     std::shared_ptr<BackendClient> backend_;
     std::shared_ptr<gateway::monitoring::MetricsCollector> metrics_;
+    FilterChain filters_;
+    std::shared_ptr<gateway::monitoring::SpanExporter> span_exporter_;
     gateway::utils::RateLimiter rate_limiter_;
     mutable std::mutex config_mutex_;
     std::function<std::chrono::steady_clock::time_point()> clock_;

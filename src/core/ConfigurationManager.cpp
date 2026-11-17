@@ -1,5 +1,6 @@
 #include "gateway/core/ConfigurationManager.h"
 
+#include "gateway/blockchain/create2.h"
 #include "gateway/blockchain/hex.h"
 #include "gateway/core/validation_rules.h"
 
@@ -403,6 +404,11 @@ MonitoringConfig readMonitoring(const toml::table& root) {
     MonitoringConfig monitoring;
     monitoring.prometheus_enabled = readBool(table, "prometheus_enabled");
     monitoring.opentelemetry_enabled = readBool(table, "opentelemetry_enabled");
+    if (table.get("otlp_endpoint") != nullptr) {
+        monitoring.otlp_endpoint = readString(table, "otlp_endpoint");
+    } else if (table.get("otel_collector_endpoint") != nullptr) {
+        monitoring.otlp_endpoint = readString(table, "otel_collector_endpoint");
+    }
     monitoring.log_level = readString(table, "log_level");
     if (!isValidLogLevel(monitoring.log_level)) {
         throw ParseError(at(requireKey(table, "log_level"),
@@ -640,6 +646,9 @@ std::vector<std::string> ConfigurationManager::validate(const Configuration& con
     if (!isValidLogLevel(config.monitoring.log_level)) {
         add("monitoring.log_level must be trace, debug, info, warn, or error");
     }
+    if (!config.monitoring.otlp_endpoint.empty() && !isValidHttpUrl(config.monitoring.otlp_endpoint)) {
+        add("monitoring.otlp_endpoint must be an http or https URL");
+    }
     return errors;
 }
 
@@ -734,6 +743,7 @@ std::string ConfigurationManager::serialize(const Configuration& config) {
     toml::table monitoring;
     monitoring.insert("prometheus_enabled", config.monitoring.prometheus_enabled);
     monitoring.insert("opentelemetry_enabled", config.monitoring.opentelemetry_enabled);
+    monitoring.insert("otlp_endpoint", config.monitoring.otlp_endpoint);
     monitoring.insert("log_level", config.monitoring.log_level);
 
     toml::table root;
@@ -789,6 +799,27 @@ void ConfigurationWatcher::run() {
         std::unique_lock lock(wait_mutex_);
         wait_cv_.wait_for(lock, poll_interval_, [this] { return stop_.load(); });
     }
+}
+
+std::string ConfigurationManager::checkFile(const std::filesystem::path& config_path, bool& valid) {
+    valid = false;
+    const auto loaded = loadFromFile(config_path);
+    if (!loaded) {
+        return loaded.error();
+    }
+    const auto errors = validate(loaded.value());
+    if (!errors.empty()) {
+        std::string report;
+        for (const auto& error : errors) {
+            report += error;
+            report.push_back('\n');
+        }
+        return report;
+    }
+    valid = true;
+    const auto wallet = gateway::blockchain::generateDeterministicWallet(loaded.value().payment_wallet_seed,
+                                                                        Network::BASE);
+    return "configuration is valid\npayment_wallet=" + wallet + "\n";
 }
 
 std::unique_ptr<ConfigurationWatcher> ConfigurationManager::watchForChanges(

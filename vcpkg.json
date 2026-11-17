@@ -1,8 +1,8 @@
 {
   "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
   "name": "synapse-gateway",
-  "version": "0.2.0",
-  "description": "SynapseGateway 0.2.0 - C++20 reverse proxy for agent stablecoin payments and ERC-8004 identity",
+  "version": "0.3.0",
+  "description": "SynapseGateway 0.3.0 - C++20 reverse proxy for agent stablecoin payments and ERC-8004 identity",
   "homepage": "https://github.com/ctronik/agentgateway",
   "license": "GPL-3.0-only",
   "supports": "windows | linux | osx",

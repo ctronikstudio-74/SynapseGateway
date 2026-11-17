@@ -56,6 +56,7 @@ public:
     [[nodiscard]] static std::string expandEnvironmentPlaceholders(std::string_view text);
     [[nodiscard]] static Expected<Configuration> loadFromString(std::string_view toml_text);
     [[nodiscard]] static std::vector<std::string> validate(const Configuration& config);
+    [[nodiscard]] static std::string checkFile(const std::filesystem::path& config_path, bool& valid);
     [[nodiscard]] static std::string serialize(const Configuration& config);
     [[nodiscard]] static std::unique_ptr<ConfigurationWatcher> watchForChanges(
         const std::filesystem::path& config_path,

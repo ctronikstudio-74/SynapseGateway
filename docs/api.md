@@ -1,6 +1,6 @@
 # SynapseGateway HTTP API
 
-Version 0.2.0. SynapseGateway is an x402 reverse proxy. An agent calls a protected path, receives HTTP 402 with the price and payment wallet, pays on the selected network, then retries with the transaction hash. The EIP-712 domain is `AgentGateway` version `1`.
+Version 0.3.0. SynapseGateway is an x402 reverse proxy. An agent calls a protected path, receives HTTP 402 with the price and payment wallet, pays on the selected network, then retries with the transaction hash. The EIP-712 domain is `AgentGateway` version `1`.
 
 ## Request headers
 
@@ -80,6 +80,18 @@ The agent response gains `X-Payment-Amount` and `X-Transaction-Hash`.
 | 504 | The backend did not answer within 30 seconds. The payment is marked refundable. |
 
 Backend HTTP 5xx responses are forwarded as-is and the payment is marked refundable. Connection failure is always 502.
+
+## Decision endpoint
+
+`GET` or `POST /v1/auth` is the hook for Envoy ext_authz, Traefik ForwardAuth, and nginx `auth_request`. Send the original method in `X-Original-Method` or `X-Forwarded-Method`, and the original path in `X-Original-URI`, `X-Forwarded-Uri`, or `X-Envoy-Original-Path`. The original agent headers, including the signature, are required. A 200 body is `{"allowed":true}` and the identity headers are on the response. The backend is not called. Any other status is the denial the agent would have received. A POST whose signature covers a body must forward that body.
+
+## MCP catalog
+
+`GET /mcp` does not require a signature. The JSON lists each configured route, its price, trust threshold, proofs, and the collection wallet. `POST /mcp` accepts MCP JSON-RPC `initialize`, `tools/list`, and `notifications/initialized`.
+
+## Check
+
+`SynapseGateway check config/gateway.toml` validates the file and prints the CREATE2 collection address. It does not listen.
 
 ## Health and metrics
 

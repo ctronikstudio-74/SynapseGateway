@@ -1,6 +1,6 @@
 # Deployment
 
-SynapseGateway 0.2.0 is C++20 and builds with CMake and vcpkg on Windows, Linux, and macOS. The process listens on the configured HTTP port and exposes Prometheus on the monitoring port. The sources are GPL-3.0-only.
+SynapseGateway 0.3.0 is C++20 and builds with CMake and vcpkg on Windows, Linux, and macOS. The process listens on the configured HTTP port and exposes Prometheus on the monitoring port. The sources are GPL-3.0-only.
 
 ## Build
 
@@ -23,8 +23,11 @@ ctest --test-dir build/windows-msvc -C Debug --output-on-failure
 The binary is `SynapseGateway`. It loads a TOML file, default `config/gateway.dev.toml`:
 
 ```bash
+./SynapseGateway check config/gateway.example.toml
 ./SynapseGateway config/gateway.example.toml
 ```
+
+`check` validates the file and prints the CREATE2 collection address. It does not open a port.
 
 `${NAME}` placeholders in the TOML are replaced from the environment before parsing. Unset names are left in place and fail validation. Production templates live in `config/gateway.prod.toml`. Keep `payment_wallet_seed` in `AGENTGW_WALLET_SEED` rather than in the file that you commit.
 

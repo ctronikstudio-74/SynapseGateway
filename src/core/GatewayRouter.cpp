@@ -12,7 +12,9 @@
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <initializer_list>
 #include <limits>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <thread>
@@ -63,6 +65,116 @@ public:
 private:
     std::atomic<std::uint64_t>& counter_;
 };
+
+std::optional<std::string> forwardedValue(const std::vector<HttpHeader>& headers, std::initializer_list<const char*> names) {
+    for (const char* name : names) {
+        if (const auto value = headerValue(headers, name)) {
+            if (!value->empty()) {
+                return value;
+            }
+        }
+    }
+    return std::nullopt;
+}
+
+std::string uriPath(std::string value) {
+    if (value.rfind("http://", 0) == 0 || value.rfind("https://", 0) == 0) {
+        const auto scheme = value.find("://");
+        const auto slash = value.find('/', scheme + 3);
+        value = slash == std::string::npos ? "/" : value.substr(slash);
+    }
+    if (value.empty() || value.front() != '/') {
+        value.insert(value.begin(), '/');
+    }
+    return value;
+}
+
+std::optional<ForwardRequest> requestFromEdge(const ForwardRequest& incoming) {
+    const auto method = forwardedValue(incoming.headers, {"X-Original-Method", "X-Forwarded-Method"});
+    const auto uri = forwardedValue(incoming.headers, {"X-Original-URI", "X-Forwarded-Uri", "X-Envoy-Original-Path"});
+    if (!method || !uri) {
+        return std::nullopt;
+    }
+    ForwardRequest rewritten = incoming;
+    rewritten.method = *method;
+    rewritten.target = uriPath(*uri);
+    if (pathOnly(rewritten.target) == "/v1/auth" || pathOnly(rewritten.target) == "/mcp") {
+        return std::nullopt;
+    }
+    rewritten.decision_only = true;
+    return rewritten;
+}
+
+std::string toolName(std::string path) {
+    std::string name;
+    for (unsigned char character : path) {
+        if (std::isalnum(character) != 0) {
+            name.push_back(static_cast<char>(std::tolower(character)));
+        } else if (!name.empty() && name.back() != '_') {
+            name.push_back('_');
+        }
+    }
+    while (!name.empty() && name.back() == '_') {
+        name.pop_back();
+    }
+    return name.empty() ? "endpoint" : name;
+}
+
+nlohmann::json toolCatalog(const Configuration& config, const std::string& wallet) {
+    nlohmann::json tools = nlohmann::json::array();
+    for (const EndpointConfig& endpoint : config.endpoints) {
+        nlohmann::json proofs = nlohmann::json::array();
+        for (const ProofType proof : endpoint.required_proofs) {
+            proofs.push_back(ProofTypeToString(proof));
+        }
+        tools.push_back({{"name", toolName(endpoint.path_pattern)},
+                         {"path", endpoint.path_pattern},
+                         {"description", "Paid SynapseGateway route " + endpoint.path_pattern},
+                         {"price_usdc", endpoint.price_usdc},
+                         {"trust_threshold", endpoint.trust_threshold},
+                         {"payment_wallet", wallet},
+                         {"inputSchema", {{"type", "object"}, {"properties", {{"body", {{"type", "string"}}}}}}},
+                         {"required_proofs", std::move(proofs)}});
+    }
+    return tools;
+}
+
+GatewayResponse mcpResponse(const Configuration& config, const std::string& wallet, const ForwardRequest& request) {
+    const nlohmann::json tools = toolCatalog(config, wallet);
+    GatewayResponse response;
+    response.content_type = "application/json";
+    response.status = 200;
+    if (request.method == "GET") {
+        response.body = nlohmann::json{{"protocol", "mcp"}, {"service", "SynapseGateway"}, {"payment_wallet", wallet}, {"tools", tools}}.dump();
+        return response;
+    }
+    const nlohmann::json body = nlohmann::json::parse(request.body, nullptr, false);
+    if (!body.is_object() || !body.contains("method")) {
+        response.status = 400;
+        response.body = R"({"jsonrpc":"2.0","error":{"code":-32600,"message":"invalid request"}})";
+        return response;
+    }
+    const std::string method = body.value("method", "");
+    nlohmann::json result;
+    if (method == "initialize") {
+        result = {{"protocolVersion", "2024-11-05"},
+                  {"capabilities", {{"tools", nlohmann::json::object()}}},
+                  {"serverInfo", {{"name", "SynapseGateway"}, {"version", "0.3.0"}}}};
+    } else if (method == "tools/list") {
+        result = {{"tools", tools}};
+    } else if (method == "notifications/initialized") {
+        response.body = "{}";
+        return response;
+    } else {
+        response.body = nlohmann::json{{"jsonrpc", "2.0"},
+                                       {"id", body.contains("id") ? body["id"] : nullptr},
+                                       {"error", {{"code", -32601}, {"message", "method not found"}}}}
+                           .dump();
+        return response;
+    }
+    response.body = nlohmann::json{{"jsonrpc", "2.0"}, {"id", body.contains("id") ? body["id"] : nullptr}, {"result", result}}.dump();
+    return response;
+}
 
 }  // namespace
 
@@ -122,6 +234,16 @@ void GatewayRouter::applyConfiguration(std::shared_ptr<Configuration> config) {
     gateway::monitoring::Logger::info("configuration reload applied to in-flight requests");
 }
 
+void GatewayRouter::addFilter(std::shared_ptr<GatewayFilter> filter) {
+    std::lock_guard lock(config_mutex_);
+    filters_.add(std::move(filter));
+}
+
+void GatewayRouter::setSpanExporter(std::shared_ptr<gateway::monitoring::SpanExporter> exporter) {
+    std::lock_guard lock(config_mutex_);
+    span_exporter_ = std::move(exporter);
+}
+
 void GatewayRouter::setTimeSource(std::function<std::chrono::steady_clock::time_point()> clock) {
     std::lock_guard lock(config_mutex_);
     clock_ = std::move(clock);
@@ -179,6 +301,22 @@ GatewayResponse GatewayRouter::handle(const ForwardRequest& request) {
             metrics_->setActiveConnections(static_cast<double>(in_flight_.load()));
         }
         gateway::monitoring::Logger::logRequest(request_id, wallet, path, amount, reputation, response.status, elapsed);
+        std::shared_ptr<gateway::monitoring::SpanExporter> exporter;
+        {
+            std::lock_guard lock(config_mutex_);
+            exporter = span_exporter_;
+        }
+        if (exporter) {
+            gateway::monitoring::SpanRecord record;
+            record.method = request.method;
+            record.path = path;
+            record.status = response.status;
+            record.duration = elapsed;
+            try {
+                exporter->exportSpan(record);
+            } catch (const std::exception&) {
+            }
+        }
         return response;
     };
 
@@ -193,6 +331,16 @@ GatewayResponse GatewayRouter::handle(const ForwardRequest& request) {
         const auto report = gateway::monitoring::makeHealthReport(networks);
         auto response = json(report.status_code, report.body);
         return finish(std::move(response), "", 0.0, 0.0);
+    }
+    if (path == "/mcp" && (request.method == "GET" || request.method == "POST")) {
+        return finish(mcpResponse(*config, blockchain_->paymentWallet(), request), "", 0.0, 0.0);
+    }
+    if (path == "/v1/auth") {
+        const auto rewritten = requestFromEdge(request);
+        if (!rewritten) {
+            return finish(json(400, R"({"error":"X-Original-URI and X-Original-Method are required"})"), "", 0.0, 0.0);
+        }
+        return handle(*rewritten);
     }
 
     if (!hasAgentSignature(request.headers)) {
@@ -312,6 +460,23 @@ GatewayResponse GatewayRouter::handle(const ForwardRequest& request) {
         gateway::monitoring::Logger::logSecurityEvent("allowlist", *wallet, "wallet is not on the endpoint allowlist");
         return finish(json(403, R"({"error":"wallet is not on the endpoint allowlist"})"), *wallet, endpoint.price_usdc, 0.0);
     }
+    {
+        FilterContext context;
+        context.phase = FilterPhase::BeforePayment;
+        context.request = &request;
+        context.wallet = *wallet;
+        context.path = path;
+        context.endpoint = &endpoint;
+        FilterChain chain;
+        {
+            std::lock_guard lock(config_mutex_);
+            chain = filters_;
+        }
+        const FilterResult filtered = chain.run(context);
+        if (!filtered.continue_request) {
+            return finish(json(filtered.status, filtered.body), *wallet, endpoint.price_usdc, 0.0);
+        }
+    }
 
     const bool prepaid_mode = endpoint.price_usdc > 0.0 && endpoint.gas_budget_usdc > endpoint.price_usdc;
     bool debited = false;
@@ -418,6 +583,26 @@ GatewayResponse GatewayRouter::handle(const ForwardRequest& request) {
         metrics_->recordVerificationLatency("pipeline", verification_elapsed);
         metrics_->recordPayment(network, endpoint.price_usdc, true);
     }
+    {
+        FilterContext context;
+        context.phase = FilterPhase::AfterIdentity;
+        context.request = &request;
+        context.wallet = *wallet;
+        context.path = path;
+        context.endpoint = &endpoint;
+        FilterChain chain;
+        {
+            std::lock_guard lock(config_mutex_);
+            chain = filters_;
+        }
+        const FilterResult filtered = chain.run(context);
+        if (!filtered.continue_request) {
+            if (debited) {
+                payment_->creditPrepaid(*wallet, endpoint.price_usdc);
+            }
+            return finish(json(filtered.status, filtered.body), *wallet, endpoint.price_usdc, reputation.composite_trust_score);
+        }
+    }
 
     ForwardRequest outbound;
     outbound.method = request.method.empty() ? "GET" : request.method;
@@ -434,6 +619,40 @@ GatewayResponse GatewayRouter::handle(const ForwardRequest& request) {
     outbound.headers.push_back(HttpHeader{"X-Agent-Network", NetworkToString(network)});
     outbound.headers.push_back(
         HttpHeader{"X-Agent-Requests", std::to_string(reputation.reputation_data ? reputation.reputation_data->total_requests : 0)});
+    {
+        FilterContext context;
+        context.phase = FilterPhase::BeforeForward;
+        context.request = &request;
+        context.wallet = *wallet;
+        context.path = path;
+        context.endpoint = &endpoint;
+        FilterChain chain;
+        {
+            std::lock_guard lock(config_mutex_);
+            chain = filters_;
+        }
+        const FilterResult filtered = chain.run(context);
+        if (!filtered.continue_request) {
+            if (debited) {
+                payment_->creditPrepaid(*wallet, endpoint.price_usdc);
+            }
+            return finish(json(filtered.status, filtered.body), *wallet, endpoint.price_usdc, reputation.composite_trust_score);
+        }
+        for (const HttpHeader& header : context.added_headers) {
+            outbound.headers.push_back(header);
+        }
+    }
+    if (request.decision_only) {
+        GatewayResponse response = json(200, R"({"allowed":true})");
+        for (const HttpHeader& header : outbound.headers) {
+            if (ownedByGateway(header.name)) {
+                response.headers.push_back(header);
+            }
+        }
+        response.headers.push_back(HttpHeader{"X-Payment-Amount", std::to_string(endpoint.price_usdc)});
+        response.headers.push_back(HttpHeader{"X-Transaction-Hash", payment_request.tx_hash.value_or("")});
+        return finish(std::move(response), *wallet, endpoint.price_usdc, reputation.composite_trust_score);
+    }
 
     const auto connect_timeout = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::min(endpoint.backend_timeout, std::chrono::seconds{5}));

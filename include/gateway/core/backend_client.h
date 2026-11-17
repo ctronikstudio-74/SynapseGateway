@@ -14,6 +14,7 @@ struct ForwardRequest {
     std::string target;
     std::string body;
     std::vector<HttpHeader> headers;
+    bool decision_only = false;
 };
 
 struct ForwardResult {

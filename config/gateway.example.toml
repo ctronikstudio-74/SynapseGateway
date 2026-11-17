@@ -163,11 +163,9 @@ bloom_filter_retention_hours = 720
 # Enable Prometheus metrics exposition
 prometheus_enabled = true
 
-# Enable OpenTelemetry distributed tracing
+# One OTLP HTTP JSON span per request. Leave the endpoint empty to keep tracing off.
 opentelemetry_enabled = false
-
-# OpenTelemetry collector endpoint (if enabled)
-# otel_collector_endpoint = "http://localhost:4317"
+otlp_endpoint = ""
 
 # Logging level: trace, debug, info, warn, error
 log_level = "info"
