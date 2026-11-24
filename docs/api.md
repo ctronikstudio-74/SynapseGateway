@@ -90,6 +90,10 @@ Backend HTTP 5xx responses are forwarded as-is and the payment is marked refunda
 
 `GET /mcp` does not require a signature. The JSON lists each configured route, its price, trust threshold, proofs, and the collection wallet. `POST /mcp` accepts MCP JSON-RPC `initialize`, `tools/list`, and `notifications/initialized`.
 
+## SDK
+
+The same calls are wrapped for C++, Python, TypeScript, Java, C#, and Lua in [sdk/README.md](../sdk/README.md). Paid support and the enterprise distribution are listed at <https://c-tronik.com/products/>, next to SynapseMFT and Synapse Firewall.
+
 ## Check
 
 `SynapseGateway check config/gateway.toml` validates the file and prints the CREATE2 collection address. It does not listen.

@@ -1,0 +1,11 @@
+{
+  "name": "@ctronik/synapse-gateway",
+  "version": "0.3.0",
+  "private": true,
+  "type": "module",
+  "description": "TypeScript client for SynapseGateway 0.3.0",
+  "types": "./src/client.ts",
+  "exports": {
+    ".": "./src/client.ts"
+  }
+}

@@ -1,0 +1,13 @@
+d:\CTronik\CTronik Studio\Synapse Projects\SynapseGateway\sdk\csharp\obj\Debug\net8.0\SynapseGateway.Client.GeneratedMSBuildEditorConfig.editorconfig
+d:\CTronik\CTronik Studio\Synapse Projects\SynapseGateway\sdk\csharp\obj\Debug\net8.0\SynapseGateway.Client.AssemblyInfoInputs.cache
+d:\CTronik\CTronik Studio\Synapse Projects\SynapseGateway\sdk\csharp\obj\Debug\net8.0\SynapseGateway.Client.AssemblyInfo.cs
+d:\CTronik\CTronik Studio\Synapse Projects\SynapseGateway\sdk\csharp\obj\Debug\net8.0\SynapseGateway.Client.csproj.CoreCompileInputs.cache
+d:\CTronik\CTronik Studio\Synapse Projects\SynapseGateway\sdk\csharp\obj\Debug\net8.0\SynapseGateway.Client.sourcelink.json
+d:\CTronik\CTronik Studio\Synapse Projects\SynapseGateway\sdk\csharp\bin\Debug\net8.0\SynapseGateway.Client.deps.json
+d:\CTronik\CTronik Studio\Synapse Projects\SynapseGateway\sdk\csharp\bin\Debug\net8.0\SynapseGateway.Client.dll
+d:\CTronik\CTronik Studio\Synapse Projects\SynapseGateway\sdk\csharp\bin\Debug\net8.0\SynapseGateway.Client.pdb
+d:\CTronik\CTronik Studio\Synapse Projects\SynapseGateway\sdk\csharp\obj\Debug\net8.0\SynapseGateway.Client.dll
+d:\CTronik\CTronik Studio\Synapse Projects\SynapseGateway\sdk\csharp\obj\Debug\net8.0\refint\SynapseGateway.Client.dll
+d:\CTronik\CTronik Studio\Synapse Projects\SynapseGateway\sdk\csharp\obj\Debug\net8.0\SynapseGateway.Client.pdb
+d:\CTronik\CTronik Studio\Synapse Projects\SynapseGateway\sdk\csharp\obj\Debug\net8.0\ref\SynapseGateway.Client.dll
+d:\CTronik\CTronik Studio\Synapse Projects\SynapseGateway\sdk\csharp\obj\Debug\net8.0\SynapseG.CE0D8072.Up2Date

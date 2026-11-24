@@ -147,6 +147,20 @@ A filter that sets `continue_request` to false stops the request with its status
 
 `GET /mcp` needs no signature. It returns the configured routes with path, price, trust threshold, required proofs, and the collection wallet. `POST /mcp` speaks a small slice of MCP JSON-RPC: `initialize`, `tools/list`, and `notifications/initialized`. Unknown methods return JSON-RPC `-32601`. The catalog is rebuilt from the configuration loaded for that request, so a reload is visible on the next call. The endpoint does not invoke the backend.
 
+## SDK
+
+`sdk/` is the client for this process. C++, Python, TypeScript, Java, C#, and Lua share one call sequence: health, MCP catalog, a signed call, the 402 retry, credits, refunds, and the `/v1/auth` decision. The C++ client signs with the gateway's EIP-712 function. The other languages take a signer that covers the same `AgentGateway` version `1` domain. The collection address is the value printed by `SynapseGateway check`.
+
+## Commercial editions
+
+This repository stays GPL-3.0-only. Paid editions are separate orders on <https://c-tronik.com/products/>.
+
+- SynapseGateway Production Support is €4,800 a year for one production instance. Professional is €12,000 a year for four instances and the enterprise distribution. Enterprise starts at €24,000 a year. Prices exclude VAT.
+- SynapseMFT Governance Suite is published at €6,000, €18,000, and from €36,000 a year. A virtual desktop is €1,200 a seat. The event bus is €4,800 or €9,600 a year.
+- Synapse Firewall's Windows core stays MIT and free. The commercial console starts at €480 a seat.
+
+A perpetual license, where the product page offers it, is three times the annual fee, then maintenance at 22 percent from the second year. The portal stops at the transfer amount. It does not charge a card.
+
 ## Design gaps that are still open
 
 Two items in older reviews are already in this version.

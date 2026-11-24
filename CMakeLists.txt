@@ -253,6 +253,16 @@ endif()
 # ============================================================================
 # Main Executable Target
 # ============================================================================
+add_library(synapse_gateway_sdk
+    sdk/cpp/src/client.cpp
+    sdk/cpp/src/http_transport.cpp
+)
+target_compile_features(synapse_gateway_sdk PUBLIC cxx_std_20)
+target_include_directories(synapse_gateway_sdk PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/sdk/cpp/include
+)
+target_link_libraries(synapse_gateway_sdk PUBLIC gateway_core)
+
 add_executable(SynapseGateway src/SynapseGateway.cpp)
 
 target_compile_features(SynapseGateway PUBLIC cxx_std_20)
@@ -341,6 +351,9 @@ if(BUILD_TESTING)
     gateway_add_test(backend_pool_test tests/core/backend_pool_test.cpp)
     gateway_add_test(gateway_flow_test tests/integration/gateway_flow_test.cpp)
     gateway_add_test(performance_test tests/perf/performance_test.cpp)
+    add_executable(sdk_client_test tests/sdk/client_test.cpp)
+    target_link_libraries(sdk_client_test PRIVATE synapse_gateway_sdk GTest::gtest GTest::gtest_main)
+    add_test(NAME sdk_client_test COMMAND sdk_client_test)
     target_compile_definitions(configuration_parser_test PRIVATE
         GATEWAY_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
     target_compile_definitions(configuration_roundtrip_test PRIVATE

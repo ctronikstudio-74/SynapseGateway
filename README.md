@@ -77,6 +77,9 @@ ctest --preset windows-msvc-release  # or appropriate preset for your platform
 - [API](docs/api.md) - x402 headers, status codes, and refunds
 - [Funzionamento](docs/funzionamento.md) - avvio, percorso di una richiesta, rimborsi e arresto
 - [Features](docs/features.md) - complete capability catalog and the remaining design gaps
+- [SDK](sdk/README.md) - C++, Python, TypeScript, Java, C#, and Lua clients for the 0.3.0 HTTP protocol
+
+The GPL-3.0-only core and the SDK stay free. Production support and the enterprise distribution are ordered from the C-Tronik product page, together with SynapseMFT and Synapse Firewall: <https://c-tronik.com/products/>.
 
 ## Project Structure
 
