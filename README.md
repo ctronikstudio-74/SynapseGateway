@@ -1,6 +1,6 @@
 # SynapseGateway
 
-Version 0.3.0. SynapseGateway is a C++20 reverse proxy that lets an AI agent pay for an API with a stablecoin transfer, prove an ERC-8004 identity, and reach the existing backend. The sources are released under GPL-3.0-only.
+Version 0.1.1. SynapseGateway is a C++20 reverse proxy that lets an AI agent pay for an API with a stablecoin transfer, prove an ERC-8004 identity, and reach the existing backend. The sources are released under GPL-3.0-only.
 
 ## Features
 
